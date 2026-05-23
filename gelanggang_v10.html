@@ -487,6 +487,7 @@ select option{background:var(--bg)}
             <input type="text" id="google-cse-cx" placeholder="xxxxxxxxx:yyyyyyy" oninput="saveKey('google-cse-cx',this.value)">
           </div>
         </div>
+        <button class="btn" style="margin-top:4px;margin-bottom:4px" onclick="simpanGoogleCSE()">💾 Simpan Google CSE</button>
         <div class="info-box" style="margin-top:-4px">
           <strong>Target situs:</strong> detik.com, kompas.com, tribunnews.com, cnnindonesia.com, liputan6.com, antaranews.com, tempo.co, sindonews.com, okezone.com, merdeka.com
         </div>
@@ -1233,6 +1234,18 @@ async function cariGoogleCSEImage(keyword){
     return {url:d.items[0].link,credit:d.items[0].displayLink,title:d.items[0].title};
   }catch(e){}
   return null;
+}
+
+function simpanGoogleCSE(){
+  const key=document.getElementById('google-cse-key').value.trim();
+  const cx=document.getElementById('google-cse-cx').value.trim();
+  if(!key||!cx){showToast('Isi API Key dan CX ID dulu!','warn');return;}
+  saveKey('google-cse-key',key);
+  saveKey('google-cse-cx',cx);
+  const el=document.getElementById('sgcse');
+  el.className='sbox ok';
+  el.textContent='Tersimpan! KEY: '+key.substring(0,8)+'... | CX: '+cx;
+  showToast('Google CSE tersimpan!','ok');
 }
 
 async function testGoogleCSE(){
