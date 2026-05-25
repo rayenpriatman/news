@@ -471,6 +471,33 @@ select option{background:var(--bg)}
         <div id="syt" class="sbox"></div>
       </div>
 
+      <div class="card">
+        <div class="card-title">🔍 Google Custom Search <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 100/hari)</span></div>
+        <div class="info-box">
+          Cari gambar langsung dari Google berdasarkan judul berita. Bebas CORS, langsung dari browser.<br><br>
+          <strong>Cara setup (5 menit):</strong><br>
+          1. Buka <a href="https://console.cloud.google.com" target="_blank" style="color:var(--red2)">console.cloud.google.com</a> → cari <strong>Custom Search API</strong> → Enable → buat API Key<br>
+          2. Buka <a href="https://programmablesearchengine.google.com" target="_blank" style="color:var(--red2)">programmablesearchengine.google.com</a> → <strong>Add</strong> → isi nama bebas → centang <strong>Search the entire web</strong> → Create<br>
+          3. Klik <strong>Customize</strong> → <strong>Search features</strong> → <strong>Image search: ON</strong> → Save<br>
+          4. Copy <strong>Search engine ID</strong> → paste di bawah
+        </div>
+        <div class="grid-2">
+          <div>
+            <label>Google API Key</label>
+            <input type="password" id="google-cse-key" placeholder="AIza..." oninput="saveKey('google-cse-key',this.value)">
+          </div>
+          <div>
+            <label>Search Engine ID (cx)</label>
+            <input type="text" id="google-cse-cx" placeholder="xxxxxxxxx:yyyyyyy" oninput="saveKey('google-cse-cx',this.value)">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="testGoogleCSE()">Test Cari Gambar</button>
+          <button class="btn btn-primary btn-sm" onclick="simpanGoogleCSE()">💾 Simpan</button>
+        </div>
+        <div id="sgcse" class="sbox" style="margin-top:8px"></div>
+      </div>
+
     </div><!-- /panel-config -->
 
     <!-- ===== PANEL: SCHEDULE ===== -->
@@ -641,7 +668,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -929,7 +956,11 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
     const hasil=[];
     for(let i=0;i<artikel.length;i++){
       setProg(75+Math.round((i/artikel.length)*20),`Posting ${i+1}/${artikel.length}: ${artikel[i].judul.substring(0,40)}...`);
-      // Fallback gambar: YouTube → Wikimedia
+      // Fallback gambar: Google CSE → YouTube → Wikimedia
+      if(!artikel[i].img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
+        const gcse=await cariGoogleCSEImage(artikel[i].judul);
+        if(gcse){artikel[i].img_url=gcse.url;artikel[i].img_type='gcse';artikel[i].img_credit=gcse.credit;}
+      }
       if(!artikel[i].img_url&&getKey('youtube-api-key')){
         const yt=await cariYoutubeDataAPI(artikel[i].judul);
         if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';}
@@ -1058,6 +1089,10 @@ async function postSemuaArtikel(tgChatId=null){
     const art=toPost[i];
     const artStatus=art._status_post||status;
     // Cari gambar kalau belum ada (urutan prioritas)
+    if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
+      const gcse=await cariGoogleCSEImage(art.judul);
+      if(gcse){art.img_url=gcse.url;art.img_type='gcse';art.img_credit=gcse.credit;}
+    }
     if(!art.img_url&&getKey('youtube-api-key')){
       const yt=await cariYoutubeDataAPI(art.judul);
       if(yt){art.img_url=yt.url;art.img_type='youtube';}
@@ -1115,6 +1150,62 @@ async function postSemuaArtikel(tgChatId=null){
   showToast(`OK  ${ok} artikel diposting!`,'ok');
   if(btn){btn.disabled=false;btn.textContent='Post Semua ke WordPress';}
   return hasil;
+}
+
+// ================================================================
+// GOOGLE CUSTOM SEARCH IMAGE
+// ================================================================
+async function cariGoogleCSEImage(keyword){
+  const key=getKey('google-cse-key');
+  const cx=getKey('google-cse-cx');
+  if(!key||!cx) return null;
+  try{
+    const q=encodeURIComponent(keyword.substring(0,80));
+    const url='https://www.googleapis.com/customsearch/v1?key='+key+'&cx='+cx+'&q='+q+'&searchType=image&num=5&imgSize=large&imgType=photo&safe=active&gl=id&hl=id';
+    const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    if(!r.ok) return null;
+    const d=await r.json();
+    if(!d.items?.length) return null;
+    const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime'];
+    for(const item of d.items){
+      const iurl=item.link||'';
+      if(!iurl.startsWith('http')) continue;
+      if(skip.some(s=>iurl.includes(s))) continue;
+      const w=item.image?.width||0;
+      const h=item.image?.height||0;
+      if(w>=300&&h>=200) return{url:iurl,credit:item.displayLink};
+    }
+    // ambil yang pertama kalau semua kena filter
+    if(d.items[0]?.link) return{url:d.items[0].link,credit:d.items[0].displayLink};
+  }catch(e){}
+  return null;
+}
+
+function simpanGoogleCSE(){
+  const key=document.getElementById('google-cse-key')?.value.trim();
+  const cx=document.getElementById('google-cse-cx')?.value.trim();
+  if(!key||!cx){showToast('Isi API Key dan CX ID dulu!','warn');return;}
+  saveKey('google-cse-key',key);
+  saveKey('google-cse-cx',cx);
+  showToast('Google CSE tersimpan!','ok');
+  const el=document.getElementById('sgcse');
+  if(el){el.className='sbox ok';el.textContent='Tersimpan!';}
+}
+
+async function testGoogleCSE(){
+  const key=getKey('google-cse-key');
+  const cx=getKey('google-cse-cx');
+  const el=document.getElementById('sgcse');
+  if(!key||!cx){el.className='sbox warn';el.textContent='Isi API Key dan CX ID dulu!';return;}
+  el.className='sbox info';el.textContent='Mencari gambar test...';
+  const res=await cariGoogleCSEImage('korupsi pejabat Indonesia');
+  if(res){
+    el.className='sbox ok';
+    el.innerHTML='OK Berhasil! Gambar dari: <strong>'+res.credit+'</strong><br><img src="'+res.url+'" style="max-width:100%;max-height:120px;margin-top:8px;border-radius:6px" onerror="this.remove()">';
+  } else {
+    el.className='sbox err';
+    el.innerHTML='Gagal. Pastikan:<br>• API Key benar<br>• Search Engine ID benar<br>• Image Search sudah ON di pengaturan Search Engine<br>• Kuota harian belum habis (100/hari)';
+  }
 }
 
 // ================================================================
@@ -1987,6 +2078,10 @@ async function generateSemuaProvinsi(){
       for(const art of arts){
         try{
           // Cari gambar untuk multi-site
+          if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
+            const gcse=await cariGoogleCSEImage(art.judul);
+            if(gcse){art.img_url=gcse.url;art.img_type='gcse';art.img_credit=gcse.credit;}
+          }
           if(!art.img_url&&getKey('youtube-api-key')){
             const yt=await cariYoutubeDataAPI(art.judul);
             if(yt){art.img_url=yt.url;art.img_type='youtube';}
@@ -2080,6 +2175,39 @@ async function postKeWPSite(art,status,site){
   const pd=await pr.json();
   if(!pr.ok) throw new Error(pd.message||'Gagal post ke '+url);
   return pd;
+}
+
+// ================================================================
+// RIWAYAT POSTING
+// ================================================================
+function addRiwayat(item){
+  riwayat.unshift(item);
+  if(riwayat.length>200) riwayat=riwayat.slice(0,200);
+  localStorage.setItem('gn_riwayat',JSON.stringify(riwayat));
+}
+
+function renderRiwayat(){
+  const el=document.getElementById('riwayat-list');
+  if(!el) return;
+  if(!riwayat.length){
+    el.innerHTML='<div style="color:var(--muted);font-size:.85rem;padding:20px 0;text-align:center">Belum ada riwayat posting.</div>';
+    return;
+  }
+  el.innerHTML=riwayat.map(r=>{
+    const tgl=new Date(r.waktu).toLocaleString('id-ID',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    return '<div class="res-item" style="margin-bottom:6px">'
+      +'<div class="res-title"><a href="'+(r.link||'#')+'" target="_blank" style="color:var(--blue)">'+r.judul+'</a></div>'
+      +'<div class="res-meta">'+r.kategori+' · '+tgl+'</div>'
+      +'</div>';
+  }).join('');
+}
+
+function hapusRiwayat(){
+  if(!confirm('Hapus semua riwayat?')) return;
+  riwayat=[];
+  localStorage.removeItem('gn_riwayat');
+  renderRiwayat();
+  showToast('Riwayat dihapus','ok');
 }
 
 // ================================================================
