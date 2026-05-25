@@ -1119,6 +1119,10 @@ async function postSemuaArtikel(tgChatId=null){
     const art=toPost[i];
     const artStatus=art._status_post||status;
     // Cari gambar kalau belum ada (urutan prioritas)
+    if(!art.img_url&&getKey('serpapi-key')){
+      const serp=await cariSerpApiImage(art.judul);
+      if(serp){art.img_url=serp.url;art.img_type='serpapi';art.img_credit=serp.credit;}
+    }
     if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
       const gcse=await cariGoogleCSEImage(art.judul);
       if(gcse){art.img_url=gcse.url;art.img_type='berita';art.img_credit=gcse.credit;}
@@ -1196,14 +1200,44 @@ async function postSemuaArtikel(tgChatId=null){
 async function cariSerpApiImage(keyword){
   const key=getKey('serpapi-key');
   if(!key) return null;
+  const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime','123rf'];
+
+  // Coba langsung dulu (kadang works tergantung environment)
   try{
     const q=encodeURIComponent(keyword+' Indonesia');
-    const url='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=5&safe=active&imgsz=large';
-    const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    const directUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large&no_cache=false';
+    const r=await fetch(directUrl,{signal:AbortSignal.timeout(10000)});
+    if(r.ok){
+      const d=await r.json();
+      if(d.error) throw new Error(d.error);
+      if(d.images_results?.length){
+        for(const img of d.images_results){
+          const iurl=img.original||img.thumbnail||'';
+          if(!iurl||!iurl.startsWith('http')) continue;
+          if(iurl.match(/\.(svg|gif)(\?.*)?$/i)) continue;
+          if(skip.some(s=>iurl.includes(s))) continue;
+          return{url:iurl,credit:img.source||'Google Images'};
+        }
+        const first=d.images_results[0];
+        if(first?.original) return{url:first.original,credit:first.source||'Google Images'};
+      }
+    }
+  }catch(e1){
+    // Direct gagal, coba via CORS proxy
+  }
+
+  // Fallback: via allorigins CORS proxy
+  try{
+    const q=encodeURIComponent(keyword+' Indonesia');
+    const targetUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large';
+    const proxyUrl='https://api.allorigins.win/get?url='+encodeURIComponent(targetUrl);
+    const r=await fetch(proxyUrl,{signal:AbortSignal.timeout(15000)});
     if(!r.ok) return null;
-    const d=await r.json();
-    if(!d.images_results||!d.images_results.length) return null;
-    const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime','123rf'];
+    const wrapper=await r.json();
+    if(!wrapper.contents) return null;
+    const d=JSON.parse(wrapper.contents);
+    if(d.error) return null;
+    if(!d.images_results?.length) return null;
     for(const img of d.images_results){
       const iurl=img.original||img.thumbnail||'';
       if(!iurl||!iurl.startsWith('http')) continue;
@@ -1211,8 +1245,10 @@ async function cariSerpApiImage(keyword){
       if(skip.some(s=>iurl.includes(s))) continue;
       return{url:iurl,credit:img.source||'Google Images'};
     }
-    if(d.images_results[0]?.original) return{url:d.images_results[0].original,credit:'Google Images'};
-  }catch(e){}
+    const first=d.images_results[0];
+    if(first?.original) return{url:first.original,credit:first.source||'Google Images'};
+  }catch(e2){}
+
   return null;
 }
 
@@ -1220,13 +1256,44 @@ async function testSerpApi(){
   const key=getKey('serpapi-key');
   const el=document.getElementById('sserp');
   if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
-  el.className='sbox info';el.style.display='block';el.textContent='Testing...';
+  el.className='sbox info';el.style.display='block';el.textContent='[..] Testing SerpApi...';
+  try{
+    // Test validasi key dulu via account endpoint
+    const accUrl='https://api.allorigins.win/get?url='+encodeURIComponent('https://serpapi.com/account?api_key='+key);
+    const ar=await fetch(accUrl,{signal:AbortSignal.timeout(10000)});
+    if(ar.ok){
+      const aw=await ar.json();
+      if(aw.contents){
+        const acc=JSON.parse(aw.contents);
+        if(acc.error){
+          el.className='sbox err';el.style.display='block';
+          el.textContent='X API Key tidak valid: '+acc.error;
+          return;
+        }
+        if(acc.account_email){
+          // Key valid, coba cari gambar
+          el.textContent='[..] Key valid ('+acc.account_email+'), mencari gambar test...';
+          const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
+          if(res){
+            el.className='sbox ok';
+            el.innerHTML='OK SerpApi aktif! Sisa: <strong>'+(acc.searches_per_month_used||'?')+'/'+(acc.plan_monthly_searches||'?')+'</strong> pencarian bulan ini<br>Test gambar: <a href="'+res.url+'" target="_blank" style="color:var(--blue)">'+res.credit+'</a>';
+          } else {
+            el.className='sbox warn';
+            el.innerHTML='[!] Key valid, tapi pencarian gambar gagal. Sisa kuota: '+(acc.plan_monthly_searches-(acc.searches_per_month_used||0))+' pencarian';
+          }
+          return;
+        }
+      }
+    }
+  }catch(e){}
+  // Fallback test langsung cari gambar
   const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
   if(res){
-    el.className='sbox ok';
+    el.className='sbox ok';el.style.display='block';
     el.innerHTML='OK SerpApi aktif! Sumber: '+res.credit;
   } else {
-    el.className='sbox err';el.textContent='Gagal - cek API Key';
+    el.className='sbox err';el.style.display='block';
+    el.innerHTML='X Gagal - kemungkinan penyebab:<br>• API Key salah<br>• Kuota habis (cek di <a href="https://serpapi.com/manage-api-key" target="_blank" style="color:var(--blue)">serpapi.com</a>)<br>• CORS diblokir browser';
   }
 }
 
@@ -2307,6 +2374,10 @@ async function generateSemuaProvinsi(){
       for(const art of arts){
         try{
           // Cari gambar untuk multi-site
+          if(!art.img_url&&getKey('serpapi-key')){
+            const serp=await cariSerpApiImage(art.judul);
+            if(serp){art.img_url=serp.url;art.img_type='serpapi';art.img_credit=serp.credit;}
+          }
           if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
             const gcse=await cariGoogleCSEImage(art.judul);
             if(gcse){art.img_url=gcse.url;art.img_type='berita';art.img_credit=gcse.credit;}
