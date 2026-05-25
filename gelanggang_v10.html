@@ -459,55 +459,19 @@ select option{background:var(--bg)}
       </div>
 
       <div class="card">
-        <div class="card-title">🔍 SerpApi — Google Images <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 100/bulan)</span></div>
+        <div class="card-title">▶ YouTube Data API <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 10.000/hari)</span></div>
         <div class="info-box">
-          Cari gambar langsung dari Google Images berdasarkan judul berita. Hasil paling relevan!<br><br>
-          <strong>Cara daftar (gratis, tanpa kartu kredit):</strong><br>
-          1. Buka <a href="https://serpapi.com" target="_blank" style="color:var(--blue)">serpapi.com</a> → Sign Up pakai email<br>
-          2. Setelah login → klik profil → <strong>API Key</strong><br>
-          3. Copy API key → paste di bawah
-        </div>
-        <label>SerpApi Key</label>
-        <input type="password" id="serpapi-key" placeholder="..." oninput="saveKey('serpapi-key',this.value)">
-        <div style="display:flex;gap:8px;margin-top:4px">
-          <button class="btn btn-outline btn-sm" onclick="testSerpApi()">Test SerpApi</button>
-          <div id="sserp" class="sbox" style="display:inline-block;padding:5px 10px;margin-top:0"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">🔍 Google Custom Search <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 100/hari)</span></div>
-        <div class="info-box">
-          Cari gambar relevan dari <strong>portal berita Indonesia</strong> (Detik, Kompas, Tribun, CNNIndonesia, dll) otomatis sesuai judul artikel.<br><br>
+          Ambil thumbnail video YouTube sebagai gambar artikel. Gratis dan tidak kena CORS.<br><br>
           <strong>Cara daftar:</strong><br>
-          1. Buka <a href="https://console.cloud.google.com" target="_blank" style="color:var(--red2)">console.cloud.google.com</a> → Enable <strong>Custom Search API</strong> → buat API Key<br>
-          2. Buka <a href="https://programmablesearchengine.google.com" target="_blank" style="color:var(--red2)">programmablesearchengine.google.com</a> → buat Search Engine → centang <strong>"Search the entire web"</strong> → copy <strong>Search Engine ID (cx)</strong>
+          1. Buka <a href="https://console.cloud.google.com" target="_blank" style="color:var(--red2)">console.cloud.google.com</a> → Enable <strong>YouTube Data API v3</strong> → buat API Key
         </div>
-        <div class="grid-2">
-          <div>
-            <label>Google API Key</label>
-            <input type="password" id="google-cse-key" placeholder="AIza..." oninput="saveKey('google-cse-key',this.value)">
-          </div>
-          <div>
-            <label>Search Engine ID (cx)</label>
-            <input type="text" id="google-cse-cx" placeholder="xxxxxxxxx:yyyyyyy" oninput="saveKey('google-cse-cx',this.value)">
-          </div>
-        </div>
-        <button class="btn" style="margin-top:4px;margin-bottom:4px" onclick="simpanGoogleCSE()">💾 Simpan Google CSE</button>
-        <div class="info-box" style="margin-top:-4px">
-          <strong>Target situs:</strong> detik.com, kompas.com, tribunnews.com, cnnindonesia.com, liputan6.com, antaranews.com, tempo.co, sindonews.com, okezone.com, merdeka.com
-        </div>
-        <button class="btn btn-outline btn-sm" onclick="testGoogleCSE()">Test Pencarian Gambar</button>
-        <div id="sgcse" class="sbox" style="margin-top:8px"></div>
+        <label>YouTube API Key</label>
+        <input type="password" id="youtube-api-key" placeholder="AIza..." oninput="saveKey('youtube-api-key',this.value);updateSidebarStatus()">
+        <button class="btn btn-outline btn-sm" onclick="testYoutubeAPI()">Test YouTube API</button>
+        <div id="syt" class="sbox"></div>
       </div>
 
-      <div class="card">
-        <div class="card-title">🎨 Ideogram AI <span style="font-size:.7rem;font-weight:400;color:var(--muted)">(~$0.08/gambar, opsional)</span></div>
-        <div class="info-box">Fallback gambar AI berkualitas tinggi jika semua sumber gagal. Daftar di <a href="https://ideogram.ai/manage-api" target="_blank" style="color:#9b59b6">ideogram.ai/manage-api</a></div>
-        <label>Ideogram API Key</label>
-        <input type="password" id="ideogram-key" placeholder="..." oninput="saveKey('ideogram-key',this.value)">
-      </div>
-    </div>
+    </div><!-- /panel-config -->
 
     <!-- ===== PANEL: SCHEDULE ===== -->
     <div class="panel" id="panel-schedule">
@@ -677,7 +641,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','ideogram-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','serpapi-key'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -896,15 +860,13 @@ async function mulaiGenerate(katOverride=null, jumlahOverride=null, waktuOverrid
   setProg(10,'Menghubungi Claude AI...');
   if(tgChatId) await sendTelegramMsg(tgChatId,`Mencari *${jumlah} berita ${kat.name}* ${waktu}...`,true);
 
-  const serpKey=getKey('serpapi-key');
-  const imgNote=serpKey?'':'Untuk setiap artikel, cari juga 1 URL gambar yang relevan dari sumber berita (bukan shutterstock/getty). Isi di field "img_url".';
   const prompt=`Kamu jurnalis senior media berita online AUTONEWS.com.
 Tugas: Gunakan web search untuk mencari ${jumlah} berita TERBARU${topikStr} dari ${waktuAkurat} yang masuk kategori "${kat.name}".
 PENTING: Cari berita yang benar-benar terjadi HARI INI atau maksimal kemarin. Jangan ambil berita lama.
 Tulis artikel berita faktual dan informatif, gaya ${gayaMap[gaya]}.
-${imgNote}
+Saat kamu membuka halaman berita, catat juga URL gambar utama dari artikel tersebut (og:image atau gambar pertama di artikel, bukan shutterstock/getty/freepik). Isi di field "img_url". Kalau tidak ada, isi null.
 Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
-[{"judul":"judul berita","img_url":"URL_GAMBAR_DARI_SUMBER_BERITA_atau_null","yt_video_id":"ID_VIDEO_YOUTUBE_atau_null","img_source":"nama sumber gambar","lead":"AUTONEWS – Kota – kalimat pembuka.","paragraf":["Paragraf 1 berisi fakta utama.","Paragraf 2 berisi detail dan latar belakang.","Paragraf 3 berisi kutipan narasumber.","Paragraf 4 berisi dampak atau perkembangan."],"excerpt":"ringkasan 1-2 kalimat.","tags":["tag1","tag2","tag3"]}]`;
+[{"judul":"judul berita","img_url":"https://url-gambar-artikel-asli.jpg","lead":"AUTONEWS – Kota – kalimat pembuka.","paragraf":["Paragraf 1 berisi fakta utama.","Paragraf 2 berisi detail dan latar belakang.","Paragraf 3 berisi kutipan narasumber.","Paragraf 4 berisi dampak atau perkembangan."],"excerpt":"ringkasan 1-2 kalimat.","tags":["tag1","tag2","tag3"]}]`;
 
   try{
     setProg(25,'Claude mencari berita...');
@@ -952,16 +914,11 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
       if(Array.isArray(art.paragraf)&&art.paragraf.length>0){
         art.konten=art.paragraf.map(p=>clean(p)).filter(p=>p&&p.length>10).join('\n\n');
       }
-      // Gambar dari Claude (img_url di JSON response)
-      if(art.img_url&&art.img_url!=='null'&&art.img_url.startsWith('http')){
+      // img_url dari Claude — langsung pakai, fallback null
+      if(art.img_url&&art.img_url!=='null'&&typeof art.img_url==='string'&&art.img_url.startsWith('http')){
         art.img_type='claude';
-      }
-      // YouTube thumbnail (override jika ada yt_video_id)
-      else if(art.yt_video_id&&art.yt_video_id!=='null'){
-        art.img_url=`https://img.youtube.com/vi/${art.yt_video_id}/maxresdefault.jpg`;
-        art.img_type='youtube';
-      }else{
-        art.img_url=null;art.img_type='none';
+      } else {
+        art.img_url=null; art.img_type='none';
       }
     });
 
@@ -972,39 +929,14 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
     const hasil=[];
     for(let i=0;i<artikel.length;i++){
       setProg(75+Math.round((i/artikel.length)*20),`Posting ${i+1}/${artikel.length}: ${artikel[i].judul.substring(0,40)}...`);
-      // 1. YouTube dari Claude response (sudah di-set sebelumnya)
-      // 2. SerpApi Google Images (PRIORITAS UTAMA)
-      if(!artikel[i].img_url&&getKey('serpapi-key')){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Google Images untuk artikel '+(i+1)+'...');
-        const serp=await cariSerpApiImage(artikel[i].judul);
-        if(serp){artikel[i].img_url=serp.url;artikel[i].img_type='serp';artikel[i].img_credit=serp.credit;}
-      }
-      // 3. Google Custom Search
-      if(!artikel[i].img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
-        const gcse=await cariGoogleCSEImage(artikel[i].judul);
-        if(gcse){artikel[i].img_url=gcse.url;artikel[i].img_type='berita';artikel[i].img_credit=gcse.credit;}
-      }
-      // 4. YouTube Data API
+      // Fallback gambar: YouTube → Wikimedia
       if(!artikel[i].img_url&&getKey('youtube-api-key')){
         const yt=await cariYoutubeDataAPI(artikel[i].judul);
         if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';}
       }
-      // 4. Wikimedia Commons (gratis, no key)
       if(!artikel[i].img_url){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Wikimedia untuk artikel '+(i+1)+'...');
         const wiki=await cariWikimediaImage(artikel[i].judul);
         if(wiki){artikel[i].img_url=wiki.url;artikel[i].img_type='wikimedia';}
-      }
-      // 5. Unsplash (gratis, no key)
-      if(!artikel[i].img_url){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Unsplash untuk artikel '+(i+1)+'...');
-        const unsp=await cariUnsplashImage(artikel[i].judul,kat.name);
-        if(unsp){artikel[i].img_url=unsp.url;artikel[i].img_type='unsplash';}
-      }
-      // 6. Ideogram AI fallback (berbayar)
-      if(!artikel[i].img_url&&getKey('ideogram-key')){
-        const ideo=await generateIdeogramImage(artikel[i].judul,kat.name);
-        if(ideo){artikel[i].img_url=ideo;artikel[i].img_type='ideogram';}
       }
       // Post ke WP
       try{
@@ -1080,7 +1012,7 @@ function tampilkanReview(){
     const pars=(art.konten||'').split('\n\n').filter(p=>p.trim());
     const preview=pars[0]||'';
     const imgBadge=art.img_url
-      ? '<span class="tag tag-green">'+(art.img_type==='berita'?'Berita':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Unsplash':'AI')+'</span>'
+      ? '<span class="tag tag-green">'+(art.img_type==='claude'?'Web':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':'Img')+'</span>'
       : '<span class="tag" style="background:var(--bg4);color:var(--muted)">[-]  No Img</span>';
     div.innerHTML=
       imgHtml+
@@ -1126,14 +1058,6 @@ async function postSemuaArtikel(tgChatId=null){
     const art=toPost[i];
     const artStatus=art._status_post||status;
     // Cari gambar kalau belum ada (urutan prioritas)
-    if(!art.img_url&&getKey('serpapi-key')){
-      const serp=await cariSerpApiImage(art.judul);
-      if(serp){art.img_url=serp.url;art.img_type='serpapi';art.img_credit=serp.credit;}
-    }
-    if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
-      const gcse=await cariGoogleCSEImage(art.judul);
-      if(gcse){art.img_url=gcse.url;art.img_type='berita';art.img_credit=gcse.credit;}
-    }
     if(!art.img_url&&getKey('youtube-api-key')){
       const yt=await cariYoutubeDataAPI(art.judul);
       if(yt){art.img_url=yt.url;art.img_type='youtube';}
@@ -1141,14 +1065,6 @@ async function postSemuaArtikel(tgChatId=null){
     if(!art.img_url){
       const wiki=await cariWikimediaImage(art.judul);
       if(wiki){art.img_url=wiki.url;art.img_type='wikimedia';}
-    }
-    if(!art.img_url){
-      const unsp=await cariUnsplashImage(art.judul,art.kategori_nama);
-      if(unsp){art.img_url=unsp.url;art.img_type='unsplash';}
-    }
-    if(!art.img_url&&getKey('ideogram-key')){
-      const ideo=await generateIdeogramImage(art.judul,art.kategori_nama);
-      if(ideo){art.img_url=ideo;art.img_type='ideogram';}
     }
     try{
       const posted=await postKeWP(art,artStatus);
@@ -1202,109 +1118,14 @@ async function postSemuaArtikel(tgChatId=null){
 }
 
 // ================================================================
-// SERPAPI - GOOGLE IMAGES
-// ================================================================
-async function cariSerpApiImage(keyword){
-  const key=getKey('serpapi-key');
-  if(!key) return null;
-  const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime','123rf'];
-  const q=encodeURIComponent(keyword.substring(0,80)+' Indonesia');
-  const targetUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large';
-
-  function pickImage(d){
-    if(!d.images_results?.length) return null;
-    for(const img of d.images_results){
-      const iurl=img.original||img.thumbnail||'';
-      if(!iurl||!iurl.startsWith('http')) continue;
-      if(iurl.match(/\.(svg|gif)(\?.*)?$/i)) continue;
-      if(skip.some(s=>iurl.includes(s))) continue;
-      return{url:iurl,credit:img.source||'Google Images'};
-    }
-    const first=d.images_results[0];
-    return first?.original?{url:first.original,credit:first.source||'Google Images'}:null;
-  }
-
-  const proxies=[
-    (u)=>u, // direct
-    (u)=>'https://corsproxy.io/?'+encodeURIComponent(u),
-    (u)=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),
-    (u)=>'https://thingproxy.freeboard.io/fetch/'+u,
-    (u)=>'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u),
-  ];
-
-  for(const proxy of proxies){
-    try{
-      const r=await fetch(proxy(targetUrl),{signal:AbortSignal.timeout(12000)});
-      if(!r.ok) continue;
-      let d;
-      try{d=await r.json();}catch(e){continue;}
-      if(!d||d.error) continue;
-      const res=pickImage(d);
-      if(res) return res;
-    }catch(e){}
-  }
-  return null;
-}
-
-async function testSerpApi(){
-  const key=getKey('serpapi-key');
-  const el=document.getElementById('sserp');
-  if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
-  el.className='sbox info';el.style.display='block';el.textContent='⏳ Testing SerpApi...';
-
-  // Ambil info akun via proxy
-  let accInfo='', accOk=false;
-  const accUrl='https://serpapi.com/account?api_key='+key;
-  const accProxies=[
-    accUrl,
-    'https://corsproxy.io/?'+encodeURIComponent(accUrl),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(accUrl),
-  ];
-  for(const pu of accProxies){
-    try{
-      const r=await fetch(pu,{signal:AbortSignal.timeout(8000)});
-      if(!r.ok) continue;
-      const acc=await r.json();
-      if(acc.error){el.className='sbox err';el.style.display='block';el.textContent='✕ API Key tidak valid: '+acc.error;return;}
-      if(acc.account_email){
-        const used=parseInt(acc.searches_per_month_used)||0;
-        const total=parseInt(acc.plan_monthly_searches)||100;
-        accInfo=' ('+acc.account_email+' | sisa '+(total-used)+'/'+total+')';
-        accOk=true;
-        el.textContent='⏳ Key valid'+accInfo+', mencari gambar test...';
-        break;
-      }
-    }catch(e){}
-  }
-
-  // Test cari gambar
-  const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
-  if(res){
-    el.className='sbox ok';el.style.display='block';
-    el.innerHTML='✓ SerpApi OK'+accInfo+'<br>Gambar ditemukan: <a href="'+res.url+'" target="_blank" style="color:var(--blue)">lihat →</a> ('+res.credit+')';
-  } else if(accOk){
-    el.className='sbox warn';el.style.display='block';
-    el.innerHTML='[!] Key valid'+accInfo+', tapi semua proxy CORS gagal.<br>'
-      +'<strong>Opsi:</strong><br>'
-      +'1. Buka tools via <strong>localhost</strong> (VSCode Live Server / XAMPP)<br>'
-      +'2. Install ekstensi <a href="https://chrome.google.com/webstore/detail/cors-unblock/lfhmikememgdcahcdlaciloancbhjino" target="_blank" style="color:var(--blue)">CORS Unblock</a> Chrome → aktifkan saat pakai tools<br>'
-      +'3. <strong>Gambar otomatis diambil Claude AI</strong> (tanpa SerpApi) saat generate berita';
-  } else {
-    el.className='sbox err';el.style.display='block';
-    el.innerHTML='✕ Gagal konek ke SerpApi. Cek:<br>• API Key benar?<br>• Internet aktif?<br>• Coba lagi beberapa saat';
-  }
-}
-
-// ================================================================
 // YOUTUBE DATA API
 // ================================================================
 async function cariYoutubeDataAPI(keyword){
   const key=getKey('youtube-api-key');
   if(!key) return null;
   try{
-    const skip=['tribun','kompas','detik','cnnindonesia','liputan6','sindonews','okezone'];
     const q=encodeURIComponent(keyword.substring(0,60)+' Indonesia');
-    const url=`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${q}&type=video&maxResults=10&key=${key}&relevanceLanguage=id&regionCode=ID`;
+    const url='https://www.googleapis.com/youtube/v3/search?part=snippet&q='+q+'&type=video&maxResults=5&key='+key+'&relevanceLanguage=id&regionCode=ID';
     const r=await fetch(url,{signal:AbortSignal.timeout(6000)});
     if(!r.ok) return null;
     const d=await r.json();
@@ -1312,70 +1133,25 @@ async function cariYoutubeDataAPI(keyword){
     for(const item of d.items){
       const videoId=item.id?.videoId;
       if(!videoId) continue;
-      const ch=(item.snippet?.channelTitle||'').toLowerCase();
-      if(skip.some(s=>ch.includes(s))) continue;
-      const thumb=item.snippet?.thumbnails?.high?.url||`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-      return{url:thumb,videoId,credit:''};
-    }
-    // Fallback: ambil yang pertama
-    const first=d.items[0];
-    if(first?.id?.videoId){
-      return{url:`https://img.youtube.com/vi/${first.id.videoId}/maxresdefault.jpg`,videoId:first.id.videoId,credit:''};
+      const thumb=item.snippet?.thumbnails?.high?.url||'https://img.youtube.com/vi/'+videoId+'/hqdefault.jpg';
+      return{url:thumb,videoId,credit:item.snippet?.channelTitle||'YouTube'};
     }
   }catch(e){}
   return null;
 }
 
-
-// ================================================================
-// GOOGLE CUSTOM SEARCH IMAGE (Portal Berita Indonesia)
-// ================================================================
-async function cariGoogleCSEImage(keyword){
-  const key=getKey('google-cse-key');
-  const cx=getKey('google-cse-cx');
-  if(!key||!cx) return null;
-  try{
-    const sitesQuery='site:detik.com OR site:kompas.com OR site:tribunnews.com OR site:cnnindonesia.com OR site:liputan6.com OR site:antaranews.com OR site:tempo.co OR site:sindonews.com OR site:okezone.com OR site:merdeka.com OR site:jpnn.com OR site:suara.com OR site:republika.co.id';
-    const q=encodeURIComponent(keyword.substring(0,80)+' '+sitesQuery);
-    const url='https://www.googleapis.com/customsearch/v1?key='+key+'&cx='+cx+'&q='+q+'&searchType=image&num=5&imgSize=large&imgType=photo&safe=active&gl=id&hl=id';
-    const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
-    if(!r.ok) return null;
-    const d=await r.json();
-    if(!d.items?.length) return null;
-    for(const item of d.items){
-      const w=item.image?.width||0;
-      const h=item.image?.height||0;
-      if(w>=400&&h>=200) return {url:item.link,credit:item.displayLink,title:item.title};
-    }
-    return {url:d.items[0].link,credit:d.items[0].displayLink,title:d.items[0].title};
-  }catch(e){}
-  return null;
-}
-
-function simpanGoogleCSE(){
-  const key=document.getElementById('google-cse-key').value.trim();
-  const cx=document.getElementById('google-cse-cx').value.trim();
-  if(!key||!cx){showToast('Isi API Key dan CX ID dulu!','warn');return;}
-  saveKey('google-cse-key',key);
-  saveKey('google-cse-cx',cx);
-  const el=document.getElementById('sgcse');
-  el.className='sbox ok';
-  el.textContent='Tersimpan! KEY: '+key.substring(0,8)+'... | CX: '+cx;
-  showToast('Google CSE tersimpan!','ok');
-}
-
-async function testGoogleCSE(){
-  const key=getKey('google-cse-key');
-  const cx=getKey('google-cse-cx');
-  const el=document.getElementById('sgcse');
-  if(!key||!cx){el.className='sbox warn';el.textContent='Isi API Key dan CX ID dulu!';return;}
-  el.className='sbox info';el.textContent='Mencari gambar test...';
-  const res=await cariGoogleCSEImage('Polisi Indonesia menangkap tersangka');
+async function testYoutubeAPI(){
+  const key=getKey('youtube-api-key');
+  const el=document.getElementById('syt');
+  if(!key){el.className='sbox warn';el.textContent='Isi API Key dulu!';return;}
+  el.className='sbox info';el.textContent='Testing...';
+  const res=await cariYoutubeDataAPI('berita Indonesia terkini');
   if(res){
     el.className='sbox ok';
-    el.innerHTML='Berhasil! Gambar dari: <strong>'+res.credit+'</strong><br><img src="'+res.url+'" style="max-width:200px;margin-top:6px;border-radius:6px" onerror="this.style.display=\'none\'">';
+    el.innerHTML='OK YouTube API aktif! Channel: '+res.credit+'<br><img src="'+res.url+'" style="max-height:80px;margin-top:6px;border-radius:6px">';
   } else {
-    el.className='sbox err';el.textContent='Gagal - cek API Key dan CX ID.';
+    el.className='sbox err';
+    el.textContent='Gagal - cek API Key atau kuota harian';
   }
 }
 
@@ -1416,167 +1192,6 @@ async function cariWikimediaImage(keyword){
   }catch(e){}
   return null;
 }
-
-// ================================================================
-// UNSPLASH (Gratis via source URL, No API Key)
-// ================================================================
-async function cariUnsplashImage(keyword,kategori){
-  try{
-    // Map kategori ke keyword Inggris yang relevan
-    const katMap={
-      'Hukum & Kriminal':'police law justice',
-      'Olahraga':'sport athlete stadium',
-      'Ekonomi':'business economy finance',
-      'Teknologi':'technology computer digital',
-      'Politik':'government politics meeting',
-      'Hiburan':'entertainment concert show',
-      'Nasional':'indonesia jakarta city',
-      'Internasional':'world global international',
-      'Otomotif':'car vehicle automobile',
-      'Gaya Hidup':'lifestyle people indonesia'
-    };
-    const base=katMap[kategori]||'indonesia news';
-    // Ambil 2 kata utama dari judul
-    const titleKw=keyword.replace(/[^a-zA-Z0-9\s]/g,'').split(' ').slice(0,3).join(' ').toLowerCase();
-    const q=encodeURIComponent(titleKw||base);
-    // Gunakan Unsplash Source API (tidak butuh key, redirect ke gambar)
-    const seed=Math.floor(Math.random()*1000);
-    const url=`https://source.unsplash.com/1280x720/?${q}&sig=${seed}`;
-    // Cek apakah URL valid (Unsplash selalu redirect, kita test dengan HEAD)
-    const r=await fetch(url,{method:'HEAD',signal:AbortSignal.timeout(6000)});
-    if(r.ok && r.url && r.url.includes('unsplash')){
-      return {url:r.url,credit:'Unsplash'};
-    }
-  }catch(e){}
-  return null;
-}
-
-// ================================================================
-// IDEOGRAM AI
-// ================================================================
-async function generateIdeogramImage(judul,kategori){
-  const key=getKey('ideogram-key');
-  if(!key) return null;
-  try{
-    const katCtx={'Hukum & Kriminal':'Indonesian police law enforcement','Olahraga':'Indonesian sports athlete','Ekonomi':'Indonesian economy business','Teknologi':'technology digital Indonesia','Politik':'Indonesian government politics','Hiburan':'Indonesian entertainment'};
-    const ctx=katCtx[kategori]||'Indonesia news';
-    const prompt=`${judul.substring(0,60)}, ${ctx}, photorealistic, professional news photography, no text, no watermark`;
-    const r=await fetch('https://api.ideogram.ai/generate',{
-      method:'POST',
-      headers:{'Api-Key':key,'Content-Type':'application/json'},
-      body:JSON.stringify({image_request:{prompt,aspect_ratio:'ASPECT_16_9',model:'V_2',magic_prompt_option:'AUTO'}}),
-      signal:AbortSignal.timeout(30000)
-    });
-    if(!r.ok) return null;
-    const d=await r.json();
-    return d.data?.[0]?.url||null;
-  }catch(e){return null;}
-}
-
-// ================================================================
-// POST KE WORDPRESS
-// ================================================================
-async function postKeWP(art,status='publish'){
-  const url=getKey('wp-url').replace(/\/$/,'');
-  const auth='Basic '+btoa(getKey('wp-user')+':'+getKey('wp-pass'));
-
-  // Upload gambar
-  let mediaId=null;
-  if(art.img_url){
-    try{
-      const ir=await fetch(art.img_url);
-      if(ir.ok){
-        const blob=await ir.blob();
-        const rawExt=art.img_url.split('.').pop().split('?')[0].toLowerCase();
-        const ext=['jpg','jpeg','png','webp'].includes(rawExt)?rawExt:'jpg';
-        const fn=`gn-${Date.now()}.${ext}`;
-        const fd=new FormData();fd.append('file',blob,fn);
-        const up=await fetch(`${url}/wp-json/wp/v2/media`,{method:'POST',headers:{'Authorization':auth,'Content-Disposition':`attachment; filename="${fn}"`},body:fd});
-        if(up.ok){const m=await up.json();mediaId=m.id;
-          await fetch(`${url}/wp-json/wp/v2/media/${mediaId}`,{method:'POST',headers:{'Authorization':auth,'Content-Type':'application/json'},body:JSON.stringify({alt_text:art.judul})}).catch(()=>{});
-        }
-      }
-    }catch(e){}
-  }
-
-  // Resolve kategori ID jika 0
-  let katIds=[];
-  if(art.kategori_id&&art.kategori_id>0){katIds=[art.kategori_id];}
-  else if(art.kategori_nama){
-    try{
-      const cr=await fetch(`${url}/wp-json/wp/v2/categories?search=${encodeURIComponent(art.kategori_nama)}&per_page=5`,{headers:{'Authorization':auth}});
-      if(cr.ok){const cats=await cr.json();const found=cats.find(c=>c.name.toLowerCase()===art.kategori_nama.toLowerCase());if(found)katIds=[found.id];}
-    }catch(e){}
-  }
-
-  // Konten HTML
-  const leadHtml=art.lead?`<p><strong>${art.lead}</strong></p>\n`:'';
-  const rawKonten=(art.konten||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
-  let pars=rawKonten.split(/\n\n+/).map(p=>p.replace(/\n/g,' ').replace(/\s+/g,' ').trim()).filter(p=>p.length>15);
-  if(pars.length<=1&&rawKonten.length>200){
-    const sents=rawKonten.replace(/\n/g,' ').match(/[^.!?]+[.!?]["']?\s*/g)||[];
-    if(sents.length>=4){const pp=Math.ceil(sents.length/4);pars=[];for(let i=0;i<sents.length;i+=pp){const c=sents.slice(i,i+pp).join('').trim();if(c.length>15)pars.push(c);}}
-  }
-  const kontenHtml=pars.map(p=>`<p style="margin-bottom:20px;line-height:1.9;text-align:justify">${p}</p>`).join('\n');
-
-  const body={title:art.judul,content:leadHtml+kontenHtml,excerpt:art.excerpt||art.lead||'',status};
-  if(katIds.length) body.categories=katIds;
-  if(mediaId) body.featured_media=mediaId;
-
-  const pr=await fetch(`${url}/wp-json/wp/v2/posts`,{method:'POST',headers:{'Authorization':auth,'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const pd=await pr.json();
-  if(!pr.ok) throw new Error(pd.message||'Gagal post ke WordPress');
-  return pd;
-}
-
-// ================================================================
-// RIWAYAT
-// ================================================================
-function addRiwayat(item){
-  riwayat.unshift(item);
-  if(riwayat.length>50) riwayat=riwayat.slice(0,50);
-  localStorage.setItem('gn_riwayat',JSON.stringify(riwayat));
-}
-function hapusRiwayat(){
-  if(confirm('Hapus semua riwayat?')){riwayat=[];localStorage.setItem('gn_riwayat','[]');renderRiwayat();}
-}
-function renderRiwayat(){
-  const el=document.getElementById('riwayat-list');
-  if(!el) return;
-  if(!riwayat.length){el.innerHTML='<div style="color:var(--muted);font-size:.85rem;padding:20px 0;text-align:center">Belum ada riwayat.</div>';return;}
-  el.innerHTML=riwayat.map(function(r){
-    return '<div class="res-item">'+
-      '<div class="res-title"><a href="'+r.link+'" target="_blank" style="color:var(--text);text-decoration:none">'+r.judul+'</a></div>'+
-      '<div class="res-meta"><span class="tag tag-red">'+r.kategori+'</span> · '+new Date(r.waktu).toLocaleString('id-ID')+' · <a href="'+r.link+'" target="_blank" style="color:var(--blue)">Lihat →</a></div>'+
-    '</div>';
-  }).join('');
-}
-
-// ================================================================
-// EDIT ARTIKEL
-// ================================================================
-function editArtikel(i){
-  editIdx=i;const art=artikel[i];
-  document.getElementById('ej').value=art.judul||'';
-  document.getElementById('ei').value=art.img_url||'';
-  document.getElementById('elead').value=art.lead||'';
-  document.getElementById('ek2').value=art.konten||'';
-  prvImg();
-  document.getElementById('emodal').style.display='block';
-  document.body.style.overflow='hidden';
-}
-function prvImg(){
-  const url=document.getElementById('ei').value.trim();
-  document.getElementById('eprev').innerHTML=url?`<img src="${url}" style="max-width:200px;max-height:110px;border-radius:6px;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display='none'">`:'';}
-function saveEdit(){
-  if(editIdx<0) return;
-  artikel[editIdx].judul=document.getElementById('ej').value;
-  artikel[editIdx].img_url=document.getElementById('ei').value;
-  artikel[editIdx].lead=document.getElementById('elead').value;
-  artikel[editIdx].konten=document.getElementById('ek2').value;
-  closeEdit();
-}
-function closeEdit(){document.getElementById('emodal').style.display='none';document.body.style.overflow='';editIdx=-1;}
 
 // ================================================================
 // TELEGRAM BOT
@@ -1698,7 +1313,7 @@ async function processUpdate(upd){
   if(lower==='/status'){
     const wpOk=!!(getKey('wp-url')&&getKey('wp-user')&&getKey('wp-pass'));
     const clOk=!!getKey('claude-key');
-    const ytOk=!!getKey('youtube-api-key');
+    
     const reply=`[=]  *Status AUTONEWS*\n\nWordPress: ${wpOk?'[OK] ':'[X] '}\nClaude AI: ${clOk?'[OK] ':'[X] '}\nYouTube API: ${ytOk?'[OK] ':'[X] '}\nTelegram Bot: [OK] \n\n_Polling aktif — siap menerima perintah_`;
     await sendTelegramMsg(chatId,reply,true);
     return;
@@ -2372,14 +1987,6 @@ async function generateSemuaProvinsi(){
       for(const art of arts){
         try{
           // Cari gambar untuk multi-site
-          if(!art.img_url&&getKey('serpapi-key')){
-            const serp=await cariSerpApiImage(art.judul);
-            if(serp){art.img_url=serp.url;art.img_type='serpapi';art.img_credit=serp.credit;}
-          }
-          if(!art.img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
-            const gcse=await cariGoogleCSEImage(art.judul);
-            if(gcse){art.img_url=gcse.url;art.img_type='berita';art.img_credit=gcse.credit;}
-          }
           if(!art.img_url&&getKey('youtube-api-key')){
             const yt=await cariYoutubeDataAPI(art.judul);
             if(yt){art.img_url=yt.url;art.img_type='youtube';}
@@ -2387,14 +1994,6 @@ async function generateSemuaProvinsi(){
           if(!art.img_url){
             const wiki=await cariWikimediaImage(art.judul);
             if(wiki){art.img_url=wiki.url;art.img_type='wikimedia';}
-          }
-          if(!art.img_url){
-            const unsp=await cariUnsplashImage(art.judul,kat.name);
-            if(unsp){art.img_url=unsp.url;art.img_type='unsplash';}
-          }
-          if(!art.img_url&&getKey('ideogram-key')){
-            const ideo=await generateIdeogramImage(art.judul,kat.name);
-            if(ideo){art.img_url=ideo;art.img_type='ideogram';}
           }
           const posted=await postKeWPSite(art,status,site);
           hasilPost.push({judul:art.judul,link:posted.link,status:'ok'});
