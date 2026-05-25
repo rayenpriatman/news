@@ -496,19 +496,20 @@ select option{background:var(--bg)}
       </div>
 
       <div class="card">
-        <div class="card-title">🔎 Bing Image Search <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 1.000/bulan)</span></div>
+        <div class="card-title">🦁 Brave Search API <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 2.000/bulan)</span></div>
         <div class="info-box">
-          Cari gambar relevan dari seluruh web berdasarkan judul berita. <strong>Gratis 1.000 pencarian/bulan, tidak butuh kartu kredit!</strong><br><br>
+          Cari gambar relevan dari seluruh web. <strong>Gratis 2.000 pencarian/bulan, tidak butuh kartu kredit!</strong><br><br>
           <strong>Cara daftar:</strong><br>
-          1. Buka <a href="https://portal.azure.com" target="_blank" style="color:var(--blue)">portal.azure.com</a> → login pakai akun Microsoft<br>
-          2. Cari <strong>"Bing Search v7"</strong> → Create → pilih Free tier (F1)<br>
-          3. Setelah dibuat → Keys and Endpoint → copy <strong>Key 1</strong>
+          1. Buka <a href="https://api.search.brave.com" target="_blank" style="color:var(--blue)">api.search.brave.com</a><br>
+          2. Klik <strong>Get Started</strong> → daftar pakai email<br>
+          3. Pilih plan <strong>Free (Data for Search)</strong><br>
+          4. Buat API key → copy
         </div>
-        <label>Bing API Key</label>
-        <input type="password" id="bing-api-key" placeholder="masukkan Bing API Key..." oninput="saveKey('bing-api-key',this.value)">
+        <label>Brave API Key</label>
+        <input type="password" id="brave-api-key" placeholder="masukkan Brave API Key..." oninput="saveKey('brave-api-key',this.value)">
         <div style="display:flex;gap:8px;margin-top:4px">
-          <button class="btn btn-outline btn-sm" onclick="testBingAPI()">Test Bing API</button>
-          <div id="sbing" class="sbox" style="margin-top:0;display:inline-block;padding:5px 10px"></div>
+          <button class="btn btn-outline btn-sm" onclick="testBraveAPI()">Test Brave API</button>
+          <div id="sbrave" class="sbox" style="margin-top:0;display:inline-block;padding:5px 10px"></div>
         </div>
       </div>
 
@@ -688,7 +689,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','ideogram-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','bing-api-key'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','ideogram-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','brave-api-key'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -989,10 +990,10 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
         if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';}
       }
       // 4. Bing Image Search (gratis 1000/bulan)
-      if(!artikel[i].img_url&&getKey('bing-api-key')){
+      if(!artikel[i].img_url&&getKey('brave-api-key')){
         setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Bing untuk artikel '+(i+1)+'...');
-        const bing=await cariBingImage(artikel[i].judul);
-        if(bing){artikel[i].img_url=bing.url;artikel[i].img_type='bing';artikel[i].img_credit=bing.credit;}
+        const bing=await cariBraveImage(artikel[i].judul);
+        if(bing){artikel[i].img_url=bing.url;artikel[i].img_type='brave';artikel[i].img_credit=bing.credit;}
       }
       // 5. Wikimedia Commons (gratis, no key)
       if(!artikel[i].img_url){
@@ -1084,7 +1085,7 @@ function tampilkanReview(){
     const pars=(art.konten||'').split('\n\n').filter(p=>p.trim());
     const preview=pars[0]||'';
     const imgBadge=art.img_url
-      ? '<span class="tag tag-green">'+(art.img_type==='berita'?'Berita':art.img_type==='bing'?'Bing':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Picsum':'AI')+'</span>'
+      ? '<span class="tag tag-green">'+(art.img_type==='berita'?'Berita':art.img_type==='brave'?'Brave':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Picsum':'AI')+'</span>'
       : '<span class="tag" style="background:var(--bg4);color:var(--muted)">[-]  No Img</span>';
     div.innerHTML=
       imgHtml+
@@ -1288,8 +1289,8 @@ async function testGoogleCSE(){
 // ================================================================
 // BING IMAGE SEARCH
 // ================================================================
-async function cariBingImage(keyword){
-  const key=getKey('bing-api-key');
+async function cariBraveImage(keyword){
+  const key=getKey('brave-api-key');
   if(!key) return null;
   try{
     // Bing Image Search API
@@ -1319,11 +1320,11 @@ async function cariBingImage(keyword){
 }
 
 async function testBingAPI(){
-  const key=getKey('bing-api-key');
+  const key=getKey('brave-api-key');
   const el=document.getElementById('sbing');
   if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
   el.className='sbox info';el.style.display='block';el.textContent='Testing...';
-  const res=await cariBingImage('Polisi Indonesia');
+  const res=await cariBraveImage('Polisi Indonesia');
   if(res){
     el.className='sbox ok';
     el.innerHTML='OK Bing aktif! Contoh: <a href="'+res.url+'" target="_blank">'+res.credit+'</a>';
