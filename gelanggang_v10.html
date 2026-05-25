@@ -977,7 +977,19 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
     const hasil=[];
     for(let i=0;i<artikel.length;i++){
       setProg(75+Math.round((i/artikel.length)*20),`Posting ${i+1}/${artikel.length}: ${artikel[i].judul.substring(0,40)}...`);
-      // 1. YouTube dari Claude response (sudah di-set sebelumnya)
+      // 1. Gambar dari Claude (situs resmi/berita/YouTube) - sudah di-set sebelumnya
+      // Test apakah URL dari Claude bisa diakses
+      if(artikel[i].img_url&&artikel[i].img_type==='claude'){
+        try{
+          const test=await fetch(artikel[i].img_url,{method:'HEAD',signal:AbortSignal.timeout(4000)});
+          if(!test.ok) {artikel[i].img_url=null;artikel[i].img_type='none';}
+        }catch(e){artikel[i].img_url=null;artikel[i].img_type='none';}
+      }
+      // YouTube thumbnail dari Claude (maxresdefault → hqdefault fallback)
+      if(artikel[i].img_url&&artikel[i].img_type==='youtube'){
+        // maxresdefault kadang tidak ada, fallback ke hqdefault
+        artikel[i].img_url_hq=artikel[i].img_url.replace('maxresdefault','hqdefault');
+      }
       // 2. Google Custom Search - Portal Berita Indonesia (PRIORITAS UTAMA)
       if(!artikel[i].img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
         setProg(75+Math.round((i/artikel.length)*20),'Cari gambar berita untuk artikel '+(i+1)+'...');
@@ -1085,7 +1097,7 @@ function tampilkanReview(){
     const pars=(art.konten||'').split('\n\n').filter(p=>p.trim());
     const preview=pars[0]||'';
     const imgBadge=art.img_url
-      ? '<span class="tag tag-green">'+(art.img_type==='berita'?'Berita':art.img_type==='brave'?'Brave':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Picsum':'AI')+'</span>'
+      ? '<span class="tag tag-green">'+(art.img_type==='claude'?'Auto':art.img_type==='berita'?'Berita':art.img_type==='brave'?'Brave':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Picsum':'AI')+'</span>'
       : '<span class="tag" style="background:var(--bg4);color:var(--muted)">[-]  No Img</span>';
     div.innerHTML=
       imgHtml+
