@@ -961,6 +961,9 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
       if(Array.isArray(art.paragraf)&&art.paragraf.length>0){
         art.konten=art.paragraf.map(p=>clean(p)).filter(p=>p&&p.length>10).join('\n\n');
       }
+      // PAKSA kategori sesuai yang dipilih user
+      art.kategori_nama=kat.name;
+      art.kategori_id=kat.id;
       // YouTube thumbnail
       if(art.yt_video_id&&art.yt_video_id!=='null'){
         art.img_url=`https://img.youtube.com/vi/${art.yt_video_id}/maxresdefault.jpg`;
@@ -977,29 +980,28 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
     const hasil=[];
     for(let i=0;i<artikel.length;i++){
       setProg(75+Math.round((i/artikel.length)*20),`Posting ${i+1}/${artikel.length}: ${artikel[i].judul.substring(0,40)}...`);
-      // 1. Gambar dari Claude (situs resmi/berita/YouTube) - sudah di-set sebelumnya
-      // Test apakah URL dari Claude bisa diakses
-      if(artikel[i].img_url&&artikel[i].img_type==='claude'){
+      // 1. Gambar dari Claude (situs resmi/portal berita) - PRIORITAS UTAMA
+      if(artikel[i]._claude_img_url){
+        setProg(75+Math.round((i/artikel.length)*20),'Cek gambar dari Claude untuk artikel '+(i+1)+'...');
         try{
-          const test=await fetch(artikel[i].img_url,{method:'HEAD',signal:AbortSignal.timeout(4000)});
-          if(!test.ok) {artikel[i].img_url=null;artikel[i].img_type='none';}
-        }catch(e){artikel[i].img_url=null;artikel[i].img_type='none';}
+          const test=await fetch(artikel[i]._claude_img_url,{method:'HEAD',signal:AbortSignal.timeout(5000)});
+          if(test.ok&&test.headers.get('content-type')?.includes('image')){
+            artikel[i].img_url=artikel[i]._claude_img_url;
+            artikel[i].img_type='claude';
+          }
+        }catch(e){}
       }
-      // YouTube thumbnail dari Claude (maxresdefault → hqdefault fallback)
-      if(artikel[i].img_url&&artikel[i].img_type==='youtube'){
-        // maxresdefault kadang tidak ada, fallback ke hqdefault
-        artikel[i].img_url_hq=artikel[i].img_url.replace('maxresdefault','hqdefault');
-      }
-      // 2. Google Custom Search - Portal Berita Indonesia (PRIORITAS UTAMA)
+      // 2. Google Custom Search - Portal Berita Indonesia
       if(!artikel[i].img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar berita untuk artikel '+(i+1)+'...');
+        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar portal berita untuk artikel '+(i+1)+'...');
         const gcse=await cariGoogleCSEImage(artikel[i].judul);
         if(gcse){artikel[i].img_url=gcse.url;artikel[i].img_type='berita';artikel[i].img_credit=gcse.credit;}
       }
       // 3. YouTube Data API
       if(!artikel[i].img_url&&getKey('youtube-api-key')){
+        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar YouTube untuk artikel '+(i+1)+'...');
         const yt=await cariYoutubeDataAPI(artikel[i].judul);
-        if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';}
+        if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';artikel[i].img_credit=yt.credit;}
       }
       // 4. Bing Image Search (gratis 1000/bulan)
       if(!artikel[i].img_url&&getKey('brave-api-key')){
@@ -1228,18 +1230,12 @@ async function cariYoutubeDataAPI(keyword){
     if(!r.ok) return null;
     const d=await r.json();
     if(!d.items?.length) return null;
+    // Ambil video pertama yang valid - tidak skip media besar
     for(const item of d.items){
       const videoId=item.id?.videoId;
       if(!videoId) continue;
-      const ch=(item.snippet?.channelTitle||'').toLowerCase();
-      if(skip.some(s=>ch.includes(s))) continue;
-      const thumb=item.snippet?.thumbnails?.high?.url||`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-      return{url:thumb,videoId,credit:''};
-    }
-    // Fallback: ambil yang pertama
-    const first=d.items[0];
-    if(first?.id?.videoId){
-      return{url:`https://img.youtube.com/vi/${first.id.videoId}/maxresdefault.jpg`,videoId:first.id.videoId,credit:''};
+      const thumb=item.snippet?.thumbnails?.high?.url||'https://img.youtube.com/vi/'+videoId+'/hqdefault.jpg';
+      return{url:thumb,videoId,credit:item.snippet?.channelTitle||'YouTube'};
     }
   }catch(e){}
   return null;
