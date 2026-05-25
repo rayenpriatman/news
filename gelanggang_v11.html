@@ -1201,42 +1201,10 @@ async function cariSerpApiImage(keyword){
   const key=getKey('serpapi-key');
   if(!key) return null;
   const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime','123rf'];
+  const q=encodeURIComponent(keyword.substring(0,80)+' Indonesia');
+  const targetUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large';
 
-  // Coba langsung dulu (kadang works tergantung environment)
-  try{
-    const q=encodeURIComponent(keyword+' Indonesia');
-    const directUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large&no_cache=false';
-    const r=await fetch(directUrl,{signal:AbortSignal.timeout(10000)});
-    if(r.ok){
-      const d=await r.json();
-      if(d.error) throw new Error(d.error);
-      if(d.images_results?.length){
-        for(const img of d.images_results){
-          const iurl=img.original||img.thumbnail||'';
-          if(!iurl||!iurl.startsWith('http')) continue;
-          if(iurl.match(/\.(svg|gif)(\?.*)?$/i)) continue;
-          if(skip.some(s=>iurl.includes(s))) continue;
-          return{url:iurl,credit:img.source||'Google Images'};
-        }
-        const first=d.images_results[0];
-        if(first?.original) return{url:first.original,credit:first.source||'Google Images'};
-      }
-    }
-  }catch(e1){
-    // Direct gagal, coba via CORS proxy
-  }
-
-  // Fallback: via allorigins CORS proxy
-  try{
-    const q=encodeURIComponent(keyword+' Indonesia');
-    const targetUrl='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=10&safe=active&imgsz=large';
-    const proxyUrl='https://api.allorigins.win/get?url='+encodeURIComponent(targetUrl);
-    const r=await fetch(proxyUrl,{signal:AbortSignal.timeout(15000)});
-    if(!r.ok) return null;
-    const wrapper=await r.json();
-    if(!wrapper.contents) return null;
-    const d=JSON.parse(wrapper.contents);
-    if(d.error) return null;
+  function pickImage(d){
     if(!d.images_results?.length) return null;
     for(const img of d.images_results){
       const iurl=img.original||img.thumbnail||'';
@@ -1246,8 +1214,32 @@ async function cariSerpApiImage(keyword){
       return{url:iurl,credit:img.source||'Google Images'};
     }
     const first=d.images_results[0];
-    if(first?.original) return{url:first.original,credit:first.source||'Google Images'};
-  }catch(e2){}
+    return first?.original?{url:first.original,credit:first.source||'Google Images'}:null;
+  }
+
+  // Strategi 1: Direct (works kalau buka dari localhost/file)
+  try{
+    const r=await fetch(targetUrl,{signal:AbortSignal.timeout(10000)});
+    if(r.ok){const d=await r.json();if(!d.error){const res=pickImage(d);if(res)return res;}}
+  }catch(e){}
+
+  // Strategi 2: corsproxy.io
+  try{
+    const r=await fetch('https://corsproxy.io/?'+encodeURIComponent(targetUrl),{signal:AbortSignal.timeout(12000)});
+    if(r.ok){const d=await r.json();if(!d.error){const res=pickImage(d);if(res)return res;}}
+  }catch(e){}
+
+  // Strategi 3: allorigins
+  try{
+    const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent(targetUrl),{signal:AbortSignal.timeout(15000)});
+    if(r.ok){
+      const w=await r.json();
+      if(w.contents){
+        const d=JSON.parse(w.contents);
+        if(!d.error){const res=pickImage(d);if(res)return res;}
+      }
+    }
+  }catch(e){}
 
   return null;
 }
@@ -1256,44 +1248,49 @@ async function testSerpApi(){
   const key=getKey('serpapi-key');
   const el=document.getElementById('sserp');
   if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
-  el.className='sbox info';el.style.display='block';el.textContent='[..] Testing SerpApi...';
+  el.className='sbox info';el.style.display='block';el.textContent='⏳ Testing SerpApi...';
+
+  // Ambil info akun
+  let accInfo='';
   try{
-    // Test validasi key dulu via account endpoint
-    const accUrl='https://api.allorigins.win/get?url='+encodeURIComponent('https://serpapi.com/account?api_key='+key);
-    const ar=await fetch(accUrl,{signal:AbortSignal.timeout(10000)});
-    if(ar.ok){
-      const aw=await ar.json();
-      if(aw.contents){
-        const acc=JSON.parse(aw.contents);
-        if(acc.error){
-          el.className='sbox err';el.style.display='block';
-          el.textContent='X API Key tidak valid: '+acc.error;
-          return;
-        }
-        if(acc.account_email){
-          // Key valid, coba cari gambar
-          el.textContent='[..] Key valid ('+acc.account_email+'), mencari gambar test...';
-          const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
-          if(res){
-            el.className='sbox ok';
-            el.innerHTML='OK SerpApi aktif! Sisa: <strong>'+(acc.searches_per_month_used||'?')+'/'+(acc.plan_monthly_searches||'?')+'</strong> pencarian bulan ini<br>Test gambar: <a href="'+res.url+'" target="_blank" style="color:var(--blue)">'+res.credit+'</a>';
-          } else {
-            el.className='sbox warn';
-            el.innerHTML='[!] Key valid, tapi pencarian gambar gagal. Sisa kuota: '+(acc.plan_monthly_searches-(acc.searches_per_month_used||0))+' pencarian';
-          }
-          return;
-        }
-      }
+    // Coba direct dulu
+    let accData=null;
+    try{
+      const r=await fetch('https://serpapi.com/account?api_key='+key,{signal:AbortSignal.timeout(8000)});
+      if(r.ok) accData=await r.json();
+    }catch(e){}
+    // Fallback proxy
+    if(!accData){
+      const r=await fetch('https://corsproxy.io/?'+encodeURIComponent('https://serpapi.com/account?api_key='+key),{signal:AbortSignal.timeout(10000)});
+      if(r.ok) accData=await r.json();
+    }
+    if(!accData){
+      const r=await fetch('https://api.allorigins.win/get?url='+encodeURIComponent('https://serpapi.com/account?api_key='+key),{signal:AbortSignal.timeout(10000)});
+      if(r.ok){const w=await r.json();if(w.contents) accData=JSON.parse(w.contents);}
+    }
+    if(accData?.error){
+      el.className='sbox err';el.style.display='block';
+      el.textContent='✕ API Key tidak valid: '+accData.error;return;
+    }
+    if(accData?.account_email){
+      const used=parseInt(accData.searches_per_month_used)||0;
+      const total=parseInt(accData.plan_monthly_searches)||100;
+      const sisa=total-used;
+      accInfo=' | Kuota: '+sisa+'/'+total+' sisa';
+      el.textContent='⏳ Key valid'+accInfo+', mencari gambar test...';
     }
   }catch(e){}
-  // Fallback test langsung cari gambar
+
+  // Test cari gambar
   const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
   if(res){
     el.className='sbox ok';el.style.display='block';
-    el.innerHTML='OK SerpApi aktif! Sumber: '+res.credit;
+    el.innerHTML='✓ SerpApi aktif'+accInfo+'<br>Test gambar: <a href="'+res.url+'" target="_blank" style="color:var(--blue)">lihat →</a> ('+res.credit+')';
   } else {
-    el.className='sbox err';el.style.display='block';
-    el.innerHTML='X Gagal - kemungkinan penyebab:<br>• API Key salah<br>• Kuota habis (cek di <a href="https://serpapi.com/manage-api-key" target="_blank" style="color:var(--blue)">serpapi.com</a>)<br>• CORS diblokir browser';
+    el.className='sbox warn';el.style.display='block';
+    el.innerHTML='[!] Key valid'+accInfo+' tapi cari gambar gagal karena CORS.<br>'
+      +'<strong>Solusi:</strong> Tools ini perlu dijalankan dari server/localhost, bukan buka file langsung di browser.<br>'
+      +'Atau install ekstensi <a href="https://chrome.google.com/webstore/detail/cors-unblock/lfhmikememgdcahcdlaciloancbhjino" target="_blank" style="color:var(--blue)">CORS Unblock</a> di Chrome.';
   }
 }
 
