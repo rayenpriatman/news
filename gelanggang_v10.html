@@ -459,14 +459,20 @@ select option{background:var(--bg)}
       </div>
 
       <div class="card">
-        <div class="card-title">▶ YouTube Data API <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 10.000/hari)</span></div>
+        <div class="card-title">🔍 SerpApi — Google Images <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 100/bulan)</span></div>
         <div class="info-box">
-          Cari thumbnail video berita relevan dari YouTube secara otomatis.<br>
-          1. Buka <a href="https://console.cloud.google.com" target="_blank" style="color:var(--red2)">console.cloud.google.com</a> → Enable <strong>YouTube Data API v3</strong><br>
-          2. Buat API Key → paste di bawah
+          Cari gambar langsung dari Google Images berdasarkan judul berita. Hasil paling relevan!<br><br>
+          <strong>Cara daftar (gratis, tanpa kartu kredit):</strong><br>
+          1. Buka <a href="https://serpapi.com" target="_blank" style="color:var(--blue)">serpapi.com</a> → Sign Up pakai email<br>
+          2. Setelah login → klik profil → <strong>API Key</strong><br>
+          3. Copy API key → paste di bawah
         </div>
-        <label>YouTube Data API Key</label>
-        <input type="password" id="youtube-api-key" placeholder="AIza..." oninput="saveKey('youtube-api-key',this.value)">
+        <label>SerpApi Key</label>
+        <input type="password" id="serpapi-key" placeholder="..." oninput="saveKey('serpapi-key',this.value)">
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-outline btn-sm" onclick="testSerpApi()">Test SerpApi</button>
+          <div id="sserp" class="sbox" style="display:inline-block;padding:5px 10px;margin-top:0"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -493,24 +499,6 @@ select option{background:var(--bg)}
         </div>
         <button class="btn btn-outline btn-sm" onclick="testGoogleCSE()">Test Pencarian Gambar</button>
         <div id="sgcse" class="sbox" style="margin-top:8px"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">🦁 Brave Search API <span style="font-size:.7rem;font-weight:400;color:var(--green)">(Gratis 2.000/bulan)</span></div>
-        <div class="info-box">
-          Cari gambar relevan dari seluruh web. <strong>Gratis 2.000 pencarian/bulan, tidak butuh kartu kredit!</strong><br><br>
-          <strong>Cara daftar:</strong><br>
-          1. Buka <a href="https://api.search.brave.com" target="_blank" style="color:var(--blue)">api.search.brave.com</a><br>
-          2. Klik <strong>Get Started</strong> → daftar pakai email<br>
-          3. Pilih plan <strong>Free (Data for Search)</strong><br>
-          4. Buat API key → copy
-        </div>
-        <label>Brave API Key</label>
-        <input type="password" id="brave-api-key" placeholder="masukkan Brave API Key..." oninput="saveKey('brave-api-key',this.value)">
-        <div style="display:flex;gap:8px;margin-top:4px">
-          <button class="btn btn-outline btn-sm" onclick="testBraveAPI()">Test Brave API</button>
-          <div id="sbrave" class="sbox" style="margin-top:0;display:inline-block;padding:5px 10px"></div>
-        </div>
       </div>
 
       <div class="card">
@@ -689,7 +677,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','ideogram-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','brave-api-key'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','ideogram-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','serpapi-key'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -961,9 +949,6 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
       if(Array.isArray(art.paragraf)&&art.paragraf.length>0){
         art.konten=art.paragraf.map(p=>clean(p)).filter(p=>p&&p.length>10).join('\n\n');
       }
-      // PAKSA kategori sesuai yang dipilih user
-      art.kategori_nama=kat.name;
-      art.kategori_id=kat.id;
       // YouTube thumbnail
       if(art.yt_video_id&&art.yt_video_id!=='null'){
         art.img_url=`https://img.youtube.com/vi/${art.yt_video_id}/maxresdefault.jpg`;
@@ -980,43 +965,32 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
     const hasil=[];
     for(let i=0;i<artikel.length;i++){
       setProg(75+Math.round((i/artikel.length)*20),`Posting ${i+1}/${artikel.length}: ${artikel[i].judul.substring(0,40)}...`);
-      // 1. Gambar dari Claude (situs resmi/portal berita) - PRIORITAS UTAMA
-      if(artikel[i]._claude_img_url){
-        setProg(75+Math.round((i/artikel.length)*20),'Cek gambar dari Claude untuk artikel '+(i+1)+'...');
-        try{
-          const test=await fetch(artikel[i]._claude_img_url,{method:'HEAD',signal:AbortSignal.timeout(5000)});
-          if(test.ok&&test.headers.get('content-type')?.includes('image')){
-            artikel[i].img_url=artikel[i]._claude_img_url;
-            artikel[i].img_type='claude';
-          }
-        }catch(e){}
+      // 1. YouTube dari Claude response (sudah di-set sebelumnya)
+      // 2. SerpApi Google Images (PRIORITAS UTAMA)
+      if(!artikel[i].img_url&&getKey('serpapi-key')){
+        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Google Images untuk artikel '+(i+1)+'...');
+        const serp=await cariSerpApiImage(artikel[i].judul);
+        if(serp){artikel[i].img_url=serp.url;artikel[i].img_type='serp';artikel[i].img_credit=serp.credit;}
       }
-      // 2. Google Custom Search - Portal Berita Indonesia
+      // 3. Google Custom Search
       if(!artikel[i].img_url&&getKey('google-cse-key')&&getKey('google-cse-cx')){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar portal berita untuk artikel '+(i+1)+'...');
         const gcse=await cariGoogleCSEImage(artikel[i].judul);
         if(gcse){artikel[i].img_url=gcse.url;artikel[i].img_type='berita';artikel[i].img_credit=gcse.credit;}
       }
-      // 3. YouTube Data API
+      // 4. YouTube Data API
       if(!artikel[i].img_url&&getKey('youtube-api-key')){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar YouTube untuk artikel '+(i+1)+'...');
         const yt=await cariYoutubeDataAPI(artikel[i].judul);
-        if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';artikel[i].img_credit=yt.credit;}
+        if(yt){artikel[i].img_url=yt.url;artikel[i].img_type='youtube';}
       }
-      // 4. Bing Image Search (gratis 1000/bulan)
-      if(!artikel[i].img_url&&getKey('brave-api-key')){
-        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Bing untuk artikel '+(i+1)+'...');
-        const bing=await cariBraveImage(artikel[i].judul);
-        if(bing){artikel[i].img_url=bing.url;artikel[i].img_type='brave';artikel[i].img_credit=bing.credit;}
-      }
-      // 5. Wikimedia Commons (gratis, no key)
+      // 4. Wikimedia Commons (gratis, no key)
       if(!artikel[i].img_url){
         setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Wikimedia untuk artikel '+(i+1)+'...');
         const wiki=await cariWikimediaImage(artikel[i].judul);
         if(wiki){artikel[i].img_url=wiki.url;artikel[i].img_type='wikimedia';}
       }
-      // 6. Pixabay/Picsum fallback (selalu ada gambar)
+      // 5. Unsplash (gratis, no key)
       if(!artikel[i].img_url){
+        setProg(75+Math.round((i/artikel.length)*20),'Cari gambar Unsplash untuk artikel '+(i+1)+'...');
         const unsp=await cariUnsplashImage(artikel[i].judul,kat.name);
         if(unsp){artikel[i].img_url=unsp.url;artikel[i].img_type='unsplash';}
       }
@@ -1099,7 +1073,7 @@ function tampilkanReview(){
     const pars=(art.konten||'').split('\n\n').filter(p=>p.trim());
     const preview=pars[0]||'';
     const imgBadge=art.img_url
-      ? '<span class="tag tag-green">'+(art.img_type==='claude'?'Auto':art.img_type==='berita'?'Berita':art.img_type==='brave'?'Brave':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Picsum':'AI')+'</span>'
+      ? '<span class="tag tag-green">'+(art.img_type==='berita'?'Berita':art.img_type==='youtube'?'YT':art.img_type==='wikimedia'?'Wiki':art.img_type==='unsplash'?'Unsplash':'AI')+'</span>'
       : '<span class="tag" style="background:var(--bg4);color:var(--muted)">[-]  No Img</span>';
     div.innerHTML=
       imgHtml+
@@ -1217,6 +1191,46 @@ async function postSemuaArtikel(tgChatId=null){
 }
 
 // ================================================================
+// SERPAPI - GOOGLE IMAGES
+// ================================================================
+async function cariSerpApiImage(keyword){
+  const key=getKey('serpapi-key');
+  if(!key) return null;
+  try{
+    const q=encodeURIComponent(keyword+' Indonesia');
+    const url='https://serpapi.com/search.json?engine=google_images&q='+q+'&hl=id&gl=id&api_key='+key+'&num=5&safe=active&imgsz=large';
+    const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    if(!r.ok) return null;
+    const d=await r.json();
+    if(!d.images_results||!d.images_results.length) return null;
+    const skip=['shutterstock','gettyimages','alamy','istockphoto','dreamstime','123rf'];
+    for(const img of d.images_results){
+      const iurl=img.original||img.thumbnail||'';
+      if(!iurl||!iurl.startsWith('http')) continue;
+      if(iurl.match(/\.(svg|gif)(\?.*)?$/i)) continue;
+      if(skip.some(s=>iurl.includes(s))) continue;
+      return{url:iurl,credit:img.source||'Google Images'};
+    }
+    if(d.images_results[0]?.original) return{url:d.images_results[0].original,credit:'Google Images'};
+  }catch(e){}
+  return null;
+}
+
+async function testSerpApi(){
+  const key=getKey('serpapi-key');
+  const el=document.getElementById('sserp');
+  if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
+  el.className='sbox info';el.style.display='block';el.textContent='Testing...';
+  const res=await cariSerpApiImage('Polisi Indonesia berita terkini');
+  if(res){
+    el.className='sbox ok';
+    el.innerHTML='OK SerpApi aktif! Sumber: '+res.credit;
+  } else {
+    el.className='sbox err';el.textContent='Gagal - cek API Key';
+  }
+}
+
+// ================================================================
 // YOUTUBE DATA API
 // ================================================================
 async function cariYoutubeDataAPI(keyword){
@@ -1230,12 +1244,18 @@ async function cariYoutubeDataAPI(keyword){
     if(!r.ok) return null;
     const d=await r.json();
     if(!d.items?.length) return null;
-    // Ambil video pertama yang valid - tidak skip media besar
     for(const item of d.items){
       const videoId=item.id?.videoId;
       if(!videoId) continue;
-      const thumb=item.snippet?.thumbnails?.high?.url||'https://img.youtube.com/vi/'+videoId+'/hqdefault.jpg';
-      return{url:thumb,videoId,credit:item.snippet?.channelTitle||'YouTube'};
+      const ch=(item.snippet?.channelTitle||'').toLowerCase();
+      if(skip.some(s=>ch.includes(s))) continue;
+      const thumb=item.snippet?.thumbnails?.high?.url||`https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+      return{url:thumb,videoId,credit:''};
+    }
+    // Fallback: ambil yang pertama
+    const first=d.items[0];
+    if(first?.id?.videoId){
+      return{url:`https://img.youtube.com/vi/${first.id.videoId}/maxresdefault.jpg`,videoId:first.id.videoId,credit:''};
     }
   }catch(e){}
   return null;
@@ -1295,53 +1315,6 @@ async function testGoogleCSE(){
 }
 
 // ================================================================
-// BING IMAGE SEARCH
-// ================================================================
-async function cariBraveImage(keyword){
-  const key=getKey('brave-api-key');
-  if(!key) return null;
-  try{
-    // Bing Image Search API
-    const q=encodeURIComponent(keyword+' Indonesia');
-    const r=await fetch('https://api.bing.microsoft.com/v7.0/images/search?q='+q+'&count=5&imageType=Photo&size=Large&safeSearch=Moderate',{
-      headers:{'Ocp-Apim-Subscription-Key':key},
-      signal:AbortSignal.timeout(6000)
-    });
-    if(!r.ok) return null;
-    const d=await r.json();
-    if(!d.value||!d.value.length) return null;
-    // Filter gambar yang valid
-    for(const img of d.value){
-      const url=img.contentUrl||'';
-      if(!url) continue;
-      if(url.match(/\.(svg|gif)(\?.*)?$/i)) continue;
-      // Skip watermark dari media besar
-      const skipDomains=['shutterstock','gettyimages','alamy','istockphoto'];
-      const isSkip=skipDomains.some(d=>url.includes(d));
-      if(isSkip) continue;
-      return{url:url, credit:img.hostPageDomainFriendlyName||'Bing Images'};
-    }
-    // Kalau semua skip, ambil yang pertama
-    if(d.value[0]) return{url:d.value[0].contentUrl, credit:'Bing Images'};
-  }catch(e){console.warn('Bing error:',e.message);}
-  return null;
-}
-
-async function testBingAPI(){
-  const key=getKey('brave-api-key');
-  const el=document.getElementById('sbing');
-  if(!key){el.className='sbox warn';el.style.display='block';el.textContent='Isi API Key dulu!';return;}
-  el.className='sbox info';el.style.display='block';el.textContent='Testing...';
-  const res=await cariBraveImage('Polisi Indonesia');
-  if(res){
-    el.className='sbox ok';
-    el.innerHTML='OK Bing aktif! Contoh: <a href="'+res.url+'" target="_blank">'+res.credit+'</a>';
-  } else {
-    el.className='sbox err';el.textContent='Gagal - cek API Key';
-  }
-}
-
-// ================================================================
 // WIKIMEDIA COMMONS (Gratis, No API Key)
 // ================================================================
 async function cariWikimediaImage(keyword){
@@ -1383,44 +1356,33 @@ async function cariWikimediaImage(keyword){
 // UNSPLASH (Gratis via source URL, No API Key)
 // ================================================================
 async function cariUnsplashImage(keyword,kategori){
-  // Unsplash Source API sudah tidak aktif, pakai Pixabay sebagai gantinya
   try{
+    // Map kategori ke keyword Inggris yang relevan
     const katMap={
-      'Hukum & Kriminal':'police law',
-      'Olahraga':'sport athlete',
-      'Ekonomi':'business economy',
-      'Teknologi':'technology digital',
-      'Politik':'government politics',
-      'Hiburan':'entertainment',
-      'Nasional':'indonesia',
-      'Internasional':'world global',
-      'Otomotif':'car vehicle',
-      'Gaya Hidup':'lifestyle people'
+      'Hukum & Kriminal':'police law justice',
+      'Olahraga':'sport athlete stadium',
+      'Ekonomi':'business economy finance',
+      'Teknologi':'technology computer digital',
+      'Politik':'government politics meeting',
+      'Hiburan':'entertainment concert show',
+      'Nasional':'indonesia jakarta city',
+      'Internasional':'world global international',
+      'Otomotif':'car vehicle automobile',
+      'Gaya Hidup':'lifestyle people indonesia'
     };
-    const base=katMap[kategori]||'indonesia';
-    // Coba Pixabay API (butuh key gratis dari pixabay.com/api/docs)
-    const pixKey=getKey('pixabay-key');
-    if(pixKey){
-      const q=encodeURIComponent(base);
-      const r=await fetch('https://pixabay.com/api/?key='+pixKey+'&q='+q+'&image_type=photo&orientation=horizontal&per_page=5&safesearch=true&lang=id',{signal:AbortSignal.timeout(5000)});
-      if(r.ok){
-        const d=await r.json();
-        if(d.hits&&d.hits.length>0){
-          const foto=d.hits[Math.floor(Math.random()*Math.min(3,d.hits.length))];
-          return{url:foto.webformatURL,credit:'Pixabay'};
-        }
-      }
+    const base=katMap[kategori]||'indonesia news';
+    // Ambil 2 kata utama dari judul
+    const titleKw=keyword.replace(/[^a-zA-Z0-9\s]/g,'').split(' ').slice(0,3).join(' ').toLowerCase();
+    const q=encodeURIComponent(titleKw||base);
+    // Gunakan Unsplash Source API (tidak butuh key, redirect ke gambar)
+    const seed=Math.floor(Math.random()*1000);
+    const url=`https://source.unsplash.com/1280x720/?${q}&sig=${seed}`;
+    // Cek apakah URL valid (Unsplash selalu redirect, kita test dengan HEAD)
+    const r=await fetch(url,{method:'HEAD',signal:AbortSignal.timeout(6000)});
+    if(r.ok && r.url && r.url.includes('unsplash')){
+      return {url:r.url,credit:'Unsplash'};
     }
-    // Fallback: Picsum Photos (gratis, selalu ada gambar)
-    const seed=Math.abs(keyword.split('').reduce((a,c)=>a+c.charCodeAt(0),0))%1000;
-    return{url:'https://picsum.photos/seed/'+seed+'/1280/720',credit:'Picsum'};
-  }catch(e){
-    // Ultimate fallback: Picsum
-    try{
-      const seed=Math.floor(Math.random()*1000);
-      return{url:'https://picsum.photos/seed/'+seed+'/1280/720',credit:'Picsum'};
-    }catch(e2){}
-  }
+  }catch(e){}
   return null;
 }
 
