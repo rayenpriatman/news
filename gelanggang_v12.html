@@ -189,6 +189,9 @@ select option{background:var(--bg)}
   <div class="nav-link" id="nav-schedule" onclick="showPanel('schedule',this)">
     <span class="nav-ico">&#9200;</span> Schedule
   </div>
+  <div class="nav-link" id="nav-msschedule" onclick="showPanel('msschedule',this)">
+    <span class="nav-ico">&#9201;</span> Multi-Site Schedule
+  </div>
   <div class="nav-link" id="nav-hasil" onclick="showPanel('hasil',this)">
     <span class="nav-ico">📊</span> Hasil Posting
   </div>
@@ -628,6 +631,61 @@ select option{background:var(--bg)}
       </div>
     </div>
 
+    <!-- ===== PANEL: MULTI-SITE SCHEDULE ===== -->
+    <div class="panel" id="panel-msschedule">
+      <div class="card">
+        <div class="card-title">&#9201; Multi-Site Schedule</div>
+        <div class="info-box">
+          <strong>Cara kerja:</strong> Setiap site akan posting di waktu acak berbeda-beda antara jam 07:00–21:00. Kategori dipilih random tiap posting. Claude akan prioritaskan berita viral/trending hari itu.<br><br>
+          Tools harus tetap terbuka di browser agar schedule berjalan.
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <label>Posting per Hari (per site)</label>
+            <select id="mss-kali">
+              <option value="1">1x per hari</option>
+              <option value="2" selected>2x per hari</option>
+              <option value="3">3x per hari</option>
+            </select>
+          </div>
+          <div>
+            <label>Status Post</label>
+            <select id="mss-status">
+              <option value="publish">Publish Langsung</option>
+              <option value="draft">Draft</option>
+            </select>
+          </div>
+        </div>
+
+        <label>Pilih Site yang Dijadwalkan</label>
+        <div id="mss-site-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+          <button class="btn btn-success" id="btn-mss-start" onclick="startMSSchedule()">&#9654; Aktifkan Schedule</button>
+          <button class="btn btn-outline" id="btn-mss-stop" onclick="stopMSSchedule()" disabled>&#9646;&#9646; Stop</button>
+        </div>
+
+        <div class="poll-status" id="mss-status-bar">
+          <span class="cc-dot off" id="mss-dot"></span>
+          <span id="mss-status-text" style="font-size:.82rem;color:var(--muted)">Schedule tidak aktif</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">&#128337; Jadwal Berikutnya</div>
+        <div id="mss-next-list" style="font-size:.82rem;color:var(--muted)">— Belum ada jadwal aktif —</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">&#128221; Log Multi-Site Schedule</div>
+        <div class="tg-log" id="mss-log">
+          <div class="tg-log-entry info">-- Menunggu schedule diaktifkan --</div>
+        </div>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="document.getElementById('mss-log').innerHTML='<div class=tg-log-entry>-- Log dibersihkan --</div>'">&#128465; Bersihkan Log</button>
+      </div>
+    </div>
+
     <!-- ===== PANEL: HASIL POSTING ===== -->
     <div class="panel" id="panel-hasil">
       <div class="card">
@@ -768,7 +826,7 @@ function getKatByName(nama){
 // ================================================================
 // NAVIGATION
 // ================================================================
-const pageTitles={sites:'Multi-Site',berita:'Generate Berita',telegram:'Telegram Bot',config:'Konfigurasi',schedule:'Schedule',hasil:'Hasil Posting'};
+const pageTitles={sites:'Multi-Site',berita:'Generate Berita',telegram:'Telegram Bot',config:'Konfigurasi',schedule:'Schedule',msschedule:'Multi-Site Schedule',hasil:'Hasil Posting'};
 function showPanel(name,navEl){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   const p=document.getElementById('panel-'+name);
@@ -777,6 +835,7 @@ function showPanel(name,navEl){
   if(navEl) navEl.classList.add('active');
   document.getElementById('page-title').textContent=pageTitles[name]||name;
   if(name==='hasil') renderRiwayat();
+  if(name==='msschedule') renderMssSiteList();
 }
 
 // ================================================================
@@ -2225,6 +2284,258 @@ function hapusRiwayat(){
   localStorage.removeItem('gn_riwayat');
   renderRiwayat();
   showToast('Riwayat dihapus','ok');
+}
+
+// ================================================================
+// MULTI-SITE SCHEDULE
+// ================================================================
+let mssInterval = null;
+let mssNextTimes = []; // [{siteId, siteName, time, done}]
+let mssActive = false;
+
+const KAT_LIST = ['Nasional','Hukum & Kriminal','Politik','Ekonomi','Olahraga','Otomotif','Gaya Hidup','Internasional','Teknologi','Hiburan'];
+
+function renderMssSiteList(){
+  const el = document.getElementById('mss-site-list');
+  if(!el) return;
+  // Site utama
+  let html = `<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">
+    <input type="checkbox" class="mss-site-check" data-main="1" checked style="width:16px;height:16px">
+    <span style="font-size:.85rem;font-weight:500">GelanggangNews (Utama)</span>
+    <span style="font-size:.72rem;color:var(--muted);margin-left:auto">${getKey('wp-url')||'—'}</span>
+  </label>`;
+  sites.forEach(s => {
+    html += `<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">
+      <input type="checkbox" class="mss-site-check" data-id="${s.id}" checked style="width:16px;height:16px">
+      <span style="font-size:.85rem;font-weight:500">${s.nama}</span>
+      <span style="font-size:.72rem;color:var(--muted);margin-left:auto">${s.keyword}</span>
+    </label>`;
+  });
+  el.innerHTML = html;
+}
+
+function mssLog(msg, type='info'){
+  const el = document.getElementById('mss-log');
+  if(!el) return;
+  const d = document.createElement('div');
+  d.className = 'tg-log-entry ' + type;
+  d.textContent = new Date().toLocaleTimeString('id-ID') + ' — ' + msg;
+  el.insertBefore(d, el.firstChild);
+  if(el.children.length > 50) el.removeChild(el.lastChild);
+}
+
+function randomTimeBetween(startHour, endHour){
+  const startMin = startHour * 60;
+  const endMin = endHour * 60;
+  const randMin = Math.floor(Math.random() * (endMin - startMin)) + startMin;
+  return randMin; // menit dari tengah malam
+}
+
+function minsToTimeStr(mins){
+  const h = Math.floor(mins/60).toString().padStart(2,'0');
+  const m = (mins%60).toString().padStart(2,'0');
+  return h+':'+m;
+}
+
+function buildMssTodaySchedule(){
+  const kali = parseInt(document.getElementById('mss-kali')?.value)||2;
+  const checkedSites = [];
+
+  // Kumpulkan site yang dicentang
+  document.querySelectorAll('.mss-site-check:checked').forEach(cb => {
+    if(cb.dataset.main){
+      checkedSites.push({id:'main', nama:'GelanggangNews (Utama)', keyword:'Indonesia', url:getKey('wp-url'), user:getKey('wp-user'), pass:getKey('wp-pass')});
+    } else {
+      const s = sites.find(s=>s.id===parseInt(cb.dataset.id));
+      if(s) checkedSites.push(s);
+    }
+  });
+
+  if(!checkedSites.length) return [];
+
+  const now = new Date();
+  const nowMins = now.getHours()*60 + now.getMinutes();
+  const schedule = [];
+
+  checkedSites.forEach(site => {
+    // Generate waktu random untuk site ini, semua berbeda
+    const times = [];
+    let attempts = 0;
+    while(times.length < kali && attempts < 100){
+      attempts++;
+      const t = randomTimeBetween(7, 21);
+      if(t <= nowMins + 2) continue; // skip waktu yang sudah lewat
+      // Pastikan jarak minimal 90 menit antar posting di site yang sama
+      if(times.some(existing => Math.abs(existing - t) < 90)) continue;
+      times.push(t);
+    }
+    times.sort((a,b)=>a-b);
+    times.forEach(t => {
+      schedule.push({
+        site: site,
+        timeMin: t,
+        timeStr: minsToTimeStr(t),
+        done: false,
+        id: site.id + '_' + t
+      });
+    });
+  });
+
+  return schedule.sort((a,b) => a.timeMin - b.timeMin);
+}
+
+function renderMssNextList(){
+  const el = document.getElementById('mss-next-list');
+  if(!el) return;
+  if(!mssNextTimes.length){ el.innerHTML = '— Belum ada jadwal aktif —'; return; }
+  el.innerHTML = mssNextTimes.map(item => {
+    const status = item.done ? '<span style="color:var(--green)">✓ Selesai</span>' : '<span style="color:var(--yellow)">⏳ Menunggu</span>';
+    return `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:.82rem">
+      <span>${item.site.nama} <span style="color:var(--muted);font-size:.72rem">(${item.site.keyword})</span></span>
+      <span style="display:flex;gap:10px;align-items:center"><span style="color:var(--blue)">${item.timeStr}</span>${status}</span>
+    </div>`;
+  }).join('');
+}
+
+async function runMssPosting(item){
+  const site = item.site;
+  const key = getKey('claude-key');
+  if(!key){ mssLog('Claude API key tidak ada!', 'err'); return; }
+  const status = document.getElementById('mss-status')?.value || 'publish';
+
+  // Pilih kategori random
+  const kat_nama = KAT_LIST[Math.floor(Math.random() * KAT_LIST.length)];
+  mssLog('Posting ke ' + site.nama + ' — kategori: ' + kat_nama, 'info');
+
+  const now = new Date();
+  const hariIni = now.toLocaleDateString('id-ID',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+
+  // Resolve kategori ID
+  let katId = 0;
+  try{
+    const cr = await fetch(site.url.replace(/\/$/,'')+'/wp-json/wp/v2/categories?search='+encodeURIComponent(kat_nama)+'&per_page=10',
+      {headers:{'Authorization':'Basic '+btoa(site.user+':'+site.pass)}});
+    if(cr.ok){
+      const cats = await cr.json();
+      const found = cats.find(c=>c.name.toLowerCase()===kat_nama.toLowerCase());
+      if(found) katId = found.id;
+    }
+  }catch(e){}
+
+  const kat = {name: kat_nama, id: katId, slug: kat_nama.toLowerCase().replace(/\s+&\s+/g,'-').replace(/\s+/g,'-')};
+
+  const prompt = 'INSTRUKSI: Balas HANYA dengan JSON array. DILARANG menulis teks penjelasan apapun. DILARANG menggunakan bahasa Inggris. '
+    + 'Kamu jurnalis senior ' + site.nama + '. '
+    + 'Cari 1 berita TERBARU yang sedang VIRAL atau TRENDING hari ini (' + hariIni + ') di wilayah ' + site.keyword + '. '
+    + 'Prioritaskan berita yang paling banyak dibicarakan atau ramai hari ini. '
+    + 'Fokus berita lokal ' + site.keyword + '. Kategori: ' + kat_nama + '. Tulis dalam bahasa Indonesia. '
+    + 'Saat membuka artikel ambil og:image atau twitter:image sebagai img_url. Kalau tidak ada isi null. '
+    + 'OUTPUT WAJIB berupa JSON array ini saja: '
+    + '[{"judul":"...","img_url":"https://... atau null","lead":"' + site.nama + ' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
+
+  try{
+    const model = document.getElementById('ai-model')?.value || 'claude-haiku-4-5-20251001';
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model, max_tokens:4000, tools:[{type:'web_search_20250305',name:'web_search'}], messages:[{role:'user',content:prompt}]})
+    });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error?.message||'API Error '+resp.status);
+
+    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    let clean = txt.replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
+    let si = clean.indexOf('['), ei = clean.lastIndexOf(']');
+    if(si===-1){si=clean.indexOf('{');ei=clean.lastIndexOf('}');if(si>-1&&ei>-1){clean='['+clean.slice(si,ei+1)+']';si=0;ei=clean.length-1;}}
+    if(si===-1||ei===-1) throw new Error('Format JSON tidak valid');
+
+    let arts = JSON.parse(clean.slice(si,ei+1));
+    if(!Array.isArray(arts)) arts=[arts];
+
+    for(const art of arts){
+      art.kategori_nama = kat.name;
+      art.kategori_id = katId;
+      if(Array.isArray(art.paragraf)&&art.paragraf.length>0){
+        art.konten = art.paragraf.filter(p=>p&&p.length>10).join('\n\n');
+      }
+      const invalidDomains=['shutterstock','gettyimages','istockphoto','alamy','dreamstime','freepik'];
+      if(art.img_url&&art.img_url!=='null'&&typeof art.img_url==='string'&&art.img_url.startsWith('http')&&
+         !invalidDomains.some(d=>art.img_url.includes(d))){
+        art.img_type='claude';
+      } else { art.img_url=null; art.img_type='none'; }
+
+      const posted = await postKeWPSite(art, status, site);
+      addRiwayat({judul:art.judul, link:posted.link, kategori:kat_nama+' - '+site.keyword, waktu:new Date().toISOString()});
+      mssLog('✓ Terposting: ' + art.judul.substring(0,50) + ' → ' + site.nama, 'ok');
+
+      if(getKey('tg-bot-token')&&getKey('tg-user-id')){
+        await sendTelegramMsg(getKey('tg-user-id'), '*[MSS] '+site.nama+'*\n'+art.judul+'\n'+posted.link, true);
+      }
+    }
+  }catch(e){
+    mssLog('✗ Gagal ' + site.nama + ': ' + e.message, 'err');
+    showToast('Gagal MSS ' + site.nama + ': ' + e.message, 'err');
+  }
+}
+
+function startMSSchedule(){
+  if(!getKey('claude-key')){showToast('Isi Claude API Key dulu!','warn');return;}
+  const checkedCount = document.querySelectorAll('.mss-site-check:checked').length;
+  if(!checkedCount){showToast('Pilih minimal 1 site!','warn');return;}
+
+  mssActive = true;
+  mssNextTimes = buildMssTodaySchedule();
+  if(!mssNextTimes.length){showToast('Semua waktu jadwal sudah lewat hari ini. Coba besok.','warn');return;}
+
+  document.getElementById('btn-mss-start').disabled = true;
+  document.getElementById('btn-mss-stop').disabled = false;
+  document.getElementById('mss-dot').className = 'cc-dot on';
+  document.getElementById('mss-status-text').textContent = 'Schedule aktif — ' + mssNextTimes.filter(t=>!t.done).length + ' posting dijadwalkan hari ini';
+
+  renderMssNextList();
+  mssLog('Schedule diaktifkan. ' + mssNextTimes.length + ' posting dijadwalkan.', 'ok');
+  localStorage.setItem('gn_mss_active','true');
+
+  // Cek setiap menit
+  mssInterval = setInterval(async () => {
+    const now = new Date();
+    const nowMins = now.getHours()*60 + now.getMinutes();
+
+    for(const item of mssNextTimes){
+      if(!item.done && nowMins >= item.timeMin){
+        item.done = true;
+        renderMssNextList();
+        await runMssPosting(item);
+      }
+    }
+
+    // Update status text
+    const remaining = mssNextTimes.filter(t=>!t.done).length;
+    const statusEl = document.getElementById('mss-status-text');
+    if(statusEl) statusEl.textContent = 'Schedule aktif — ' + remaining + ' posting tersisa hari ini';
+
+    // Reset jadwal di tengah malam
+    if(now.getHours()===0 && now.getMinutes()===1){
+      mssNextTimes = buildMssTodaySchedule();
+      mssNextTimes.forEach(t=>t.done=false);
+      renderMssNextList();
+      mssLog('Jadwal baru dibuat untuk hari ini. ' + mssNextTimes.length + ' posting.', 'info');
+    }
+  }, 60000); // cek tiap 1 menit
+
+  showToast('Multi-Site Schedule aktif!', 'ok');
+}
+
+function stopMSSchedule(){
+  mssActive = false;
+  if(mssInterval){ clearInterval(mssInterval); mssInterval=null; }
+  document.getElementById('btn-mss-start').disabled = false;
+  document.getElementById('btn-mss-stop').disabled = true;
+  document.getElementById('mss-dot').className = 'cc-dot off';
+  document.getElementById('mss-status-text').textContent = 'Schedule tidak aktif';
+  localStorage.removeItem('gn_mss_active');
+  mssLog('Schedule dihentikan.', 'err');
+  showToast('Multi-Site Schedule dihentikan.', 'warn');
 }
 
 // ================================================================
