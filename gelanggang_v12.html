@@ -2023,13 +2023,12 @@ async function generateSemuaProvinsi(){
 
     try{
       const key=getKey('claude-key');
-      const prompt='Kamu jurnalis senior '+site.nama+'. '
-        +'Cari '+jumlah+' berita TERBARU hari ini ('+hariIni+') '
-        +'di wilayah '+site.keyword+'. '
-        +'Fokus berita lokal daerah '+site.keyword+'. '
-        +'Kategori: '+kat.name+'. Gaya: formal dan profesional. '
-        +'Saat membuka artikel, ambil URL gambar utama (og:image) ke field img_url. Kalau tidak ada, isi null. '
-        +'Balas HANYA JSON array, TANPA teks lain, TANPA backtick: '
+      const prompt='INSTRUKSI: Balas HANYA dengan JSON array. DILARANG menulis teks penjelasan apapun. DILARANG menggunakan bahasa Inggris. '
+        +'Kamu jurnalis senior '+site.nama+'. '
+        +'Cari '+jumlah+' berita TERBARU hari ini ('+hariIni+') di wilayah '+site.keyword+'. '
+        +'Fokus berita lokal '+site.keyword+'. Kategori: '+kat.name+'. Tulis dalam bahasa Indonesia. '
+        +'Saat membuka artikel ambil og:image atau twitter:image sebagai img_url. Kalau tidak ada isi null. '
+        +'OUTPUT WAJIB berupa JSON array ini saja: '
         +'[{"judul":"...","img_url":"https://... atau null","lead":"'+site.nama+' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
 
       const resp=await fetch('https://api.anthropic.com/v1/messages',{
