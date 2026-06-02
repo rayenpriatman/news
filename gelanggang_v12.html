@@ -2443,7 +2443,32 @@ async function runMssPosting(item){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error?.message||'API Error '+resp.status);
 
-    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    // Handle tool_use stop_reason — Claude belum selesai nulis JSON, perlu request lanjutan
+    let finalContent = data.content || [];
+    if(data.stop_reason === 'tool_use') {
+      const toolUseBlocks = finalContent.filter(b => b.type === 'tool_use');
+      const toolResults = toolUseBlocks.map(b => ({
+        type: 'tool_result',
+        tool_use_id: b.id,
+        content: 'Gunakan hasil pencarian yang sudah kamu lakukan untuk menulis JSON.'
+      }));
+      const resp2 = await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model, max_tokens:4000, tools:[{type:'web_search_20250305',name:'web_search'}],
+          messages:[
+            {role:'user', content:prompt},
+            {role:'assistant', content:finalContent},
+            {role:'user', content:toolResults}
+          ]
+        })
+      });
+      const data2 = await resp2.json();
+      if(!resp2.ok) throw new Error(data2.error?.message||'API Error '+resp2.status);
+      finalContent = data2.content || [];
+    }
+
+    const txt = finalContent.filter(b=>b.type==='text').map(b=>b.text).join('');
     let clean = txt.replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
     let si = clean.indexOf('['), ei = clean.lastIndexOf(']');
     if(si===-1){si=clean.indexOf('{');ei=clean.lastIndexOf('}');if(si>-1&&ei>-1){clean='['+clean.slice(si,ei+1)+']';si=0;ei=clean.length-1;}}
