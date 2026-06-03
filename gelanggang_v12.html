@@ -658,6 +658,21 @@ select option{background:var(--bg)}
           </div>
         </div>
 
+        <label>Kategori</label>
+        <select id="mss-kategori">
+          <option value="random">🎲 Random (acak tiap posting)</option>
+          <option value="Nasional">Nasional</option>
+          <option value="Hukum &amp; Kriminal">Hukum &amp; Kriminal</option>
+          <option value="Politik">Politik</option>
+          <option value="Ekonomi">Ekonomi</option>
+          <option value="Olahraga">Olahraga</option>
+          <option value="Otomotif">Otomotif</option>
+          <option value="Gaya Hidup">Gaya Hidup</option>
+          <option value="Internasional">Internasional</option>
+          <option value="Teknologi">Teknologi</option>
+          <option value="Hiburan">Hiburan</option>
+        </select>
+
         <label>Pilih Site yang Dijadwalkan</label>
         <div id="mss-site-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px"></div>
 
@@ -2404,7 +2419,10 @@ async function runMssPosting(item){
   const status = document.getElementById('mss-status')?.value || 'publish';
 
   // Pilih kategori random
-  const kat_nama = KAT_LIST[Math.floor(Math.random() * KAT_LIST.length)];
+  const mssKatPilihan = document.getElementById('mss-kategori')?.value || 'random';
+  const kat_nama = (mssKatPilihan === 'random')
+    ? KAT_LIST[Math.floor(Math.random() * KAT_LIST.length)]
+    : mssKatPilihan;
   mssLog('Posting ke ' + site.nama + ' — kategori: ' + kat_nama, 'info');
 
   const now = new Date();
