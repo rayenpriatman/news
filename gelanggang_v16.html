@@ -1060,6 +1060,14 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
         const posted=await postKeWP(artikel[i],status);
         hasil.push({...artikel[i],wp_id:posted.id,wp_link:posted.link,status:'ok'});
         addRiwayat({judul:artikel[i].judul,link:posted.link,kategori:kat.name,waktu:new Date().toISOString()});
+        sendToSheet({
+          waktu:new Date().toLocaleString('id-ID'),
+          site:'GelanggangNews (Utama)',
+          kategori:kat.name,
+          judul:artikel[i].judul,
+          link:posted.link,
+          status:status
+        });
       }catch(e){
         hasil.push({...artikel[i],status:'err',err:e.message});
       }
@@ -1191,6 +1199,14 @@ async function postSemuaArtikel(tgChatId=null){
       const posted=await postKeWP(art,artStatus);
       hasil.push({...art,wp_id:posted.id,wp_link:posted.link,status:'ok'});
       addRiwayat({judul:art.judul,link:posted.link,kategori:art.kategori_nama,waktu:new Date().toISOString()});
+      sendToSheet({
+        waktu:new Date().toLocaleString('id-ID'),
+        site:'GelanggangNews (Utama)',
+        kategori:art.kategori_nama,
+        judul:art.judul,
+        link:posted.link,
+        status:artStatus
+      });
     }catch(e){
       hasil.push({...art,status:'err',err:e.message});
     }
@@ -2196,6 +2212,14 @@ async function generateSemuaProvinsi(){
           const posted=await postKeWPSite(art,status,site);
           hasilPost.push({judul:art.judul,link:posted.link,status:'ok'});
           addRiwayat({judul:art.judul,link:posted.link,kategori:kat.name+' - '+site.keyword,waktu:new Date().toISOString()});
+          sendToSheet({
+            waktu:new Date().toLocaleString('id-ID'),
+            site:site.nama,
+            kategori:kat.name,
+            judul:art.judul,
+            link:posted.link,
+            status:status
+          });
         }catch(e){hasilPost.push({judul:art.judul||'?',link:'',status:'err',err:e.message});}
       }
       hasilSemua.push({site:site.nama,keyword:site.keyword,hasil:hasilPost,status:'ok'});
