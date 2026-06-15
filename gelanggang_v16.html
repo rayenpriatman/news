@@ -2279,13 +2279,18 @@ async function postKeWPSite(art,status,site){
   }
 
   let katIds=[];
-  if(art.kategori_id&&art.kategori_id>0){katIds=[art.kategori_id];}
-  else if(art.kategori_nama){
+  if(art.kategori_nama){
     try{
-      const cr=await fetch(url+'/wp-json/wp/v2/categories?search='+encodeURIComponent(art.kategori_nama)+'&per_page=5',{headers:{'Authorization':auth}});
-      if(cr.ok){const cats=await cr.json();const found=cats.find(c=>c.name.toLowerCase()===art.kategori_nama.toLowerCase());if(found)katIds=[found.id];}
+      const cr=await fetch(url+'/wp-json/wp/v2/categories?search='+encodeURIComponent(art.kategori_nama)+'&per_page=10',{headers:{'Authorization':auth}});
+      if(cr.ok){
+        const cats=await cr.json();
+        let found=cats.find(c=>c.name.toLowerCase()===art.kategori_nama.toLowerCase());
+        if(!found && cats.length) found=cats[0];
+        if(found) katIds=[found.id];
+      }
     }catch(e){}
   }
+  if(!katIds.length && art.kategori_id && art.kategori_id>0){katIds=[art.kategori_id];}
 
   const leadHtml=art.lead?'<p><strong>'+art.lead+'</strong></p>\n':'';
   const rawKonten=(art.konten||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
