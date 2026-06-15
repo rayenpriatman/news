@@ -2295,6 +2295,7 @@ async function sendToSheet(data){
   try{
     await fetch(url,{
       method:'POST',
+      mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify(data)
     });
@@ -2307,11 +2308,18 @@ async function testSheetWebhook(){
   const url=document.getElementById('sheet-webhook-url')?.value.trim();
   const el=document.getElementById('ssheet');
   if(!url){ el.innerHTML='<span style="color:var(--red2)">Isi URL Web App dulu</span>'; return; }
+  if(!url.includes('script.google.com')||!url.endsWith('/exec')){
+    el.innerHTML='<span style="color:var(--red2)">✗ URL tidak valid. Harus diakhiri dengan /exec</span>';
+    return;
+  }
   saveKey('sheet-webhook-url',url);
   el.innerHTML='Mengirim test...';
   try{
+    // Apps Script Web App selalu redirect + CORS opaque, jadi response tidak bisa dibaca.
+    // Kalau fetch tidak throw (tidak ada network error), anggap request berhasil terkirim.
     await fetch(url,{
       method:'POST',
+      mode:'no-cors',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify({
         waktu:new Date().toLocaleString('id-ID'),
@@ -2322,9 +2330,9 @@ async function testSheetWebhook(){
         status:'test'
       })
     });
-    el.innerHTML='<span style="color:var(--green)">✓ Terkirim! Cek Google Sheet kamu.</span>';
+    el.innerHTML='<span style="color:var(--green)">✓ Terhubung! Cek Google Sheet kamu, baris "Test Site" seharusnya sudah muncul.</span>';
   }catch(e){
-    el.innerHTML='<span style="color:var(--red2)">✗ Gagal: '+e.message+'</span>';
+    el.innerHTML='<span style="color:var(--red2)">✗ Gagal terhubung: '+e.message+'</span>';
   }
 }
 
