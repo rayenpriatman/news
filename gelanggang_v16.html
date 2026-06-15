@@ -2307,12 +2307,14 @@ async function sendToSheet(data){
 async function testSheetWebhook(){
   const url=document.getElementById('sheet-webhook-url')?.value.trim();
   const el=document.getElementById('ssheet');
-  if(!url){ el.innerHTML='<span style="color:var(--red2)">Isi URL Web App dulu</span>'; return; }
+  if(!url){ el.className='sbox err'; el.innerHTML='Isi URL Web App dulu'; return; }
   if(!url.includes('script.google.com')||!url.endsWith('/exec')){
-    el.innerHTML='<span style="color:var(--red2)">✗ URL tidak valid. Harus diakhiri dengan /exec</span>';
+    el.className='sbox err';
+    el.innerHTML='✗ URL tidak valid. Harus diakhiri dengan /exec';
     return;
   }
   saveKey('sheet-webhook-url',url);
+  el.className='sbox info';
   el.innerHTML='Mengirim test...';
   try{
     // Apps Script Web App selalu redirect + CORS opaque, jadi response tidak bisa dibaca.
@@ -2330,9 +2332,11 @@ async function testSheetWebhook(){
         status:'test'
       })
     });
-    el.innerHTML='<span style="color:var(--green)">✓ Terhubung! Cek Google Sheet kamu, baris "Test Site" seharusnya sudah muncul.</span>';
+    el.className='sbox ok';
+    el.innerHTML='✓ Terhubung! Cek Google Sheet kamu, baris "Test Site" seharusnya sudah muncul.';
   }catch(e){
-    el.innerHTML='<span style="color:var(--red2)">✗ Gagal terhubung: '+e.message+'</span>';
+    el.className='sbox err';
+    el.innerHTML='✗ Gagal terhubung: '+e.message;
   }
 }
 
