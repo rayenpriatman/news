@@ -502,6 +502,29 @@ select option{background:var(--bg)}
       </div>
 
       <div class="card">
+        <div class="card-title">📷 Sumber Gambar Berita</div>
+        <label>Ambil gambar dari</label>
+        <select id="img-mode" onchange="saveKey('img-mode',this.value)">
+          <option value="artikel">Foto asli dari artikel sumber — hanya yang POLOS (tanpa tulisan/logo)</option>
+          <option value="stok">Foto stok bebas lisensi (Pexels) — selalu polos, ilustrasi umum</option>
+        </select>
+        <div class="info-box" style="margin-top:10px">
+          <strong>Foto asli:</strong> paling sesuai dengan kejadian. Tiap kandidat dicek Claude; yang ada judul, logo, watermark atau template berita otomatis ditolak.<br>
+          <strong>Foto stok:</strong> tidak mengambil dari media lain dan aman hak cipta, tapi gambarnya ilustrasi (mis. garis polisi, palu hakim), bukan foto kejadian.
+          API key gratis: daftar di <a href="https://www.pexels.com/api/" target="_blank" style="color:var(--red2)">pexels.com/api</a>.
+        </div>
+        <label>Media Prioritas (foto tanpa watermark) — satu domain per baris</label>
+        <textarea id="media-prioritas" rows="5" style="width:100%;font-family:monospace" placeholder="kumparan.com&#10;waspada.id&#10;go.id&#10;infopublik.id" oninput="saveKey('media-prioritas',this.value)"></textarea>
+        <div style="font-size:.75rem;color:var(--muted);margin:4px 0 10px"><code>go.id</code> = semua situs pemerintah (polri.go.id, jatimprov.go.id, dll). Kosongkan untuk pakai daftar bawaan.</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;text-transform:none;letter-spacing:0;margin-bottom:12px">
+          <input type="checkbox" id="img-hanya-prioritas" style="width:16px;height:16px" onchange="saveKey('img-hanya-prioritas',this.checked?'true':'false')">
+          Hanya ambil dari media prioritas (kalau tidak ketemu → pakai gambar default)
+        </label>
+        <label>Pexels API Key</label>
+        <input type="password" id="pexels-key" placeholder="isi kalau memilih Foto stok" oninput="saveKey('pexels-key',this.value)">
+      </div>
+
+      <div class="card">
         <div class="card-title">🖼 Gambar Default (Cadangan Terakhir)</div>
         <div class="info-box">
           Dipakai kalau semua pencarian gambar gagal, supaya tidak ada berita tayang tanpa gambar.<br><br>
@@ -776,7 +799,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','sheet-webhook-url','default-media-id'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','sheet-webhook-url','default-media-id','pexels-key','img-mode','media-prioritas'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -797,6 +820,7 @@ function loadAllFields(){
       const val=getKey(k);
       if(el&&val){ el.value=val; }
     });
+    const hp=document.getElementById('img-hanya-prioritas'); if(hp) hp.checked=getKey('img-hanya-prioritas')==='true';
     console.log('Fields loaded OK');
   }catch(e){ console.error('loadAllFields error:',e); }
 }
@@ -2298,7 +2322,16 @@ async function cariGoogleCSEImageList(keyword,log){
 }
 
 // --- Sumber baru: Claude cari artikel asli → ambil og:image artikel itu
-async function cariArtikelSumberViaClaude(judul,log){
+const MEDIA_PRIORITAS_DEFAULT='kumparan.com\nwaspada.id\ngo.id\ninfopublik.id';
+function getMediaPrioritas(){
+  return (getKey('media-prioritas')||MEDIA_PRIORITAS_DEFAULT).split(/[\n,]+/)
+    .map(d=>d.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').replace(/\/.*$/,'')).filter(Boolean);
+}
+function dariMediaPrioritas(u){
+  try{const h=new URL(u).hostname.toLowerCase();return getMediaPrioritas().some(d=>h===d||h.endsWith('.'+d));}catch(e){return false;}
+}
+
+async function cariArtikelSumberViaClaude(judul,log,domains){
   const key=getKey('claude-key');
   if(!key){log&&log('&nbsp;&nbsp;· Claude: API key belum diisi','err');return [];}
   try{
@@ -2306,7 +2339,7 @@ async function cariArtikelSumberViaClaude(judul,log){
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:600,
-        tools:[{type:'web_search_20250305',name:'web_search',max_uses:2}],
+        tools:[Object.assign({type:'web_search_20250305',name:'web_search',max_uses:2},domains&&domains.length?{allowed_domains:domains}:{})],
         messages:[{role:'user',content:'Cari artikel berita online Indonesia tentang: "'+judul+'". Balas hanya daftar URL artikel (maksimal 5), satu per baris.'}]})
     });
     const d=await r.json();
@@ -2320,7 +2353,7 @@ async function cariArtikelSumberViaClaude(judul,log){
     });
     const blok=/youtube\.com|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com\/|wikipedia\.org|gelanggangnews|satelit\.news/;
     const cocok=hasil.filter(h=>!blok.test(h.url)&&h.skor>=BATAS_RELEVAN).sort((a,b)=>b.skor-a.skor).slice(0,5);
-    log&&log('&nbsp;&nbsp;· Claude: '+hasil.length+' hasil, '+cocok.length+' artikel cocok dengan judul');
+    log&&log('&nbsp;&nbsp;· Claude'+(domains&&domains.length?' (media prioritas)':' (semua media)')+': '+hasil.length+' hasil, '+cocok.length+' artikel cocok dengan judul');
     return cocok;
   }catch(e){log&&log('&nbsp;&nbsp;· Claude: '+e.message,'err');return [];}
 }
@@ -2377,7 +2410,13 @@ async function kumpulkanKandidatGambar(art,log){
   // 0. Gambar dari Claude saat menulis berita (hanya kalau dari situs berita, bukan Wikipedia)
   if(art.img_url&&!/wiki(pedia|media)/i.test(art.img_url)) add({url:art.img_url,credit:art.img_credit||'',type:art.img_type||'claude'});
   // 1. Artikel asli yang judulnya cocok → og:image
-  const artikel=await cariArtikelSumberViaClaude(art.judul,log);
+  //    Cari dulu di MEDIA PRIORITAS (kumparan, waspada, situs pemerintah: foto tanpa watermark),
+  //    baru ke semua media kalau tidak ketemu.
+  let artikel=await cariArtikelSumberViaClaude(art.judul,log,getMediaPrioritas());
+  if(!artikel.length && getKey('img-hanya-prioritas')!=='true'){
+    artikel=await cariArtikelSumberViaClaude(art.judul,log,null);
+  }
+  artikel.sort((a,b)=>(dariMediaPrioritas(b.url)?1:0)-(dariMediaPrioritas(a.url)?1:0));
   for(const a of artikel){
     const og=await ambilOgImage(a.url,log);
     if(!og) continue;
@@ -2388,7 +2427,8 @@ async function kumpulkanKandidatGambar(art,log){
   }
   if(artikel.length) log&&log('&nbsp;&nbsp;· gambar artikel terbaca: '+list.filter(x=>x.type==='artikel').length+'/'+artikel.length);
   // 2. Google CSE (kalau masih aktif) — hanya hasil yang judulnya cocok
-  if(list.length<2) (await cariGoogleCSEImageList(art.judul,log)).forEach(add);
+  if(list.length<2) (await cariGoogleCSEImageList(art.judul,log))
+    .sort((a,b)=>(dariMediaPrioritas('https://'+(b.credit||''))?1:0)-(dariMediaPrioritas('https://'+(a.credit||''))?1:0)).forEach(add);
   // 3. YouTube — hanya video yang judulnya cocok
   if(list.length<2&&getKey('youtube-api-key')){
     const yt=await cariYoutubeDataAPI(art.judul);
@@ -2444,16 +2484,91 @@ async function uploadBlobKeWP(blob,site,judul,credit){
   return (await up.json()).id;
 }
 
+// ================================================================
+// v17: FILTER FOTO POLOS (dicek Claude Vision) + SUMBER FOTO STOK PEXELS
+// ================================================================
+async function blobKeBase64(blob){
+  return await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(',')[1]);fr.onerror=rej;fr.readAsDataURL(blob);});
+}
+
+// true = foto asli polos tanpa tulisan/logo/template
+async function cekFotoPolos(blob,judul,log){
+  const key=getKey('claude-key');
+  if(!key) return true;
+  try{
+    // kecilkan dulu supaya hemat token
+    const kecil=await new Promise(res=>{
+      const im=new Image();const ou=URL.createObjectURL(blob);
+      im.onload=()=>{const sc=Math.min(1,768/Math.max(im.naturalWidth,im.naturalHeight));const c=document.createElement('canvas');
+        c.width=Math.round(im.naturalWidth*sc);c.height=Math.round(im.naturalHeight*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+        URL.revokeObjectURL(ou);c.toBlob(b=>res(b||blob),'image/jpeg',0.8);};
+      im.onerror=()=>{URL.revokeObjectURL(ou);res(blob);};im.src=ou;
+    });
+    const b64=await blobKeBase64(kecil);
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:20,messages:[{role:'user',content:[
+        {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
+        {type:'text',text:'Periksa gambar ini. Jawab POLOS hanya jika ini foto asli (bukan desain grafis) TANPA tulisan judul/headline, TANPA teks besar, TANPA logo atau watermark media yang terlihat, TANPA template/bingkai berita, bukan kolase, bukan screenshot video/media sosial, bukan poster/infografis. Selain itu jawab TIDAK. Jawab satu kata saja.'}
+      ]}]})
+    });
+    const d=await r.json();
+    if(!r.ok){log&&log('&nbsp;&nbsp;· cek polos gagal: '+(d.error?.message||r.status),'warn');return false;}
+    const jawab=((d.content||[]).map(x=>x.text||'').join('')).toUpperCase();
+    return jawab.includes('POLOS');
+  }catch(e){log&&log('&nbsp;&nbsp;· cek polos error: '+e.message,'warn');return false;}
+}
+
+// Kata kunci bahasa Inggris untuk foto stok (tanpa nama orang)
+async function kataKunciStok(judul){
+  const key=getKey('claude-key');
+  const fallback='indonesia city street';
+  if(!key) return fallback;
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:30,messages:[{role:'user',content:'Judul berita: "'+judul+'". Tulis 2-4 kata bahasa Inggris untuk mencari FOTO STOK ilustrasi yang cocok (benda/suasana umum, tanpa nama orang/tempat, tanpa kekerasan eksplisit). Contoh: "police line tape", "courtroom gavel", "flood village". Balas kata kuncinya saja.'}]})
+    });
+    const d=await r.json();
+    const t=((d.content||[]).map(x=>x.text||'').join('')).replace(/["'\n]/g,' ').trim();
+    return t||fallback;
+  }catch(e){return fallback;}
+}
+
+async function cariPexels(judul,log){
+  const key=getKey('pexels-key');
+  if(!key){log&&log('&nbsp;&nbsp;· Pexels: API key belum diisi (menu Konfigurasi)','err');return [];}
+  const q=await kataKunciStok(judul);
+  try{
+    const r=await fetch('https://api.pexels.com/v1/search?per_page=15&orientation=landscape&query='+encodeURIComponent(q),{headers:{'Authorization':key},signal:AbortSignal.timeout(10000)});
+    if(!r.ok){log&&log('&nbsp;&nbsp;· Pexels: HTTP '+r.status,'err');return [];}
+    const d=await r.json();
+    const foto=(d.photos||[]).sort(()=>Math.random()-0.5); // acak supaya tidak selalu foto yang sama
+    log&&log('&nbsp;&nbsp;· Pexels "'+q+'": '+foto.length+' foto');
+    return foto.slice(0,5).map(f=>({url:f.src.large2x||f.src.large,credit:'Pexels / '+f.photographer,type:'pexels',polos:true}));
+  }catch(e){log&&log('&nbsp;&nbsp;· Pexels: '+e.message,'err');return [];}
+}
+
 // Pipeline lengkap: kandidat → download → upload → default
 async function siapkanGambar(art,site,logDetail){
   const log=(m,t)=>{try{mssLog(m.replace(/&nbsp;/g,''),t);}catch(e){} console.log('[gambar]',m);};
   const detail=logDetail||((m,t)=>{console.log('[gambar]',m);});
+  const mode=getKey('img-mode')||'artikel';
   let kandidat=[];
-  try{kandidat=await kumpulkanKandidatGambar(art,detail);}catch(e){detail('&nbsp;&nbsp;· error: '+e.message,'err');}
-  let errUpload='';
+  try{
+    kandidat = mode==='stok' ? await cariPexels(art.judul,detail) : await kumpulkanKandidatGambar(art,detail);
+  }catch(e){detail('&nbsp;&nbsp;· error: '+e.message,'err');}
+  let errUpload='',cekVision=0;
   for(const k of kandidat.slice(0,8)){
     const blob=await downloadGambar(k.url);
     if(!blob){detail('&nbsp;&nbsp;· gagal unduh: '+k.url.substring(0,80),'warn');continue;}
+    if(!k.polos){
+      if(cekVision>=4) break; // batasi biaya: maksimal 4 cek per berita
+      cekVision++;
+      if(!(await cekFotoPolos(blob,art.judul,detail))){detail('&nbsp;&nbsp;· ditolak (ada tulisan/logo): '+(k.credit||k.type),'warn');continue;}
+    }
     try{
       const id=await uploadBlobKeWP(blob,site,art.judul,k.credit);
       art.img_url=k.url;art.img_type=k.type;art.img_credit=k.credit;
