@@ -2359,15 +2359,10 @@ async function cariArtikelSumberViaClaude(judul,log,domains){
 }
 
 // Ambil og:image dari halaman artikel (lewat layanan yang bebas CORS)
-async function ambilOgImage(pageUrl,log){
+let microlinkHabis=false;
+// Ambil gambar dari halaman artikel: gambar utama (og:image) + foto di dalam isi artikel
+async function ambilGambarArtikel(pageUrl,log){
   const host=new URL(pageUrl).hostname.replace(/^www\./,'');
-  // 1) microlink (gratis ±50/hari)
-  try{
-    const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(pageUrl),{signal:AbortSignal.timeout(15000)});
-    if(r.ok){const d=await r.json();const u=d.data?.image?.url;if(u) return {img:u,title:d.data?.title||''};}
-    else log&&log('&nbsp;&nbsp;· microlink '+host+': HTTP '+r.status,'warn');
-  }catch(e){}
-  // 2) baca HTML lewat pembaca/proxy, cari meta og:image / twitter:image
   const sumber=[
     {u:'https://r.jina.ai/'+pageUrl,h:{'X-Return-Format':'html'}},
     {u:'https://api.allorigins.win/raw?url='+encodeURIComponent(pageUrl),h:{}},
@@ -2377,14 +2372,36 @@ async function ambilOgImage(pageUrl,log){
     try{
       const r=await fetch(sb.u,{headers:sb.h,signal:AbortSignal.timeout(15000)});
       if(!r.ok) continue;
-      const html=(await r.text()).substring(0,300000);
-      const m=html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i)
+      const html=(await r.text()).substring(0,600000);
+      if(html.length<2000) continue;
+      const abs=x=>{try{return new URL(x.replace(/&amp;/g,'&').trim(),pageUrl).href;}catch(e){return null;}};
+      const imgs=[];
+      const og=html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i)
             ||html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+      // foto di dalam isi artikel (sering polos, beda dengan og:image yang bertemplate)
+      const re=/<img[^>]+?(?:data-src|data-original|data-lazy-src|src)=["']([^"']+?\.(?:jpe?g|webp|png)(?:\?[^"']*)?)["']/gi;
+      let m;const isi=[];
+      while((m=re.exec(html))&&isi.length<6){
+        const u=abs(m[1]);
+        if(!u||!gambarValid(u)) continue;
+        if(/(thumb|small|_s\.|\/s\/|w=1\d\d\b|100x|150x|200x|ads?[\/_-]|banner|sticker|emoji)/i.test(u)) continue;
+        isi.push(u);
+      }
+      if(og){const u=abs(og[1]);if(u) imgs.push({url:u,jenis:'utama'});}
+      isi.forEach(u=>imgs.push({url:u,jenis:'isi'}));
       const t=(html.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)||html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1]||'';
-      if(m) return {img:new URL(m[1].replace(/&amp;/g,'&'),pageUrl).href,title:t};
+      if(imgs.length) return {imgs,title:t};
     }catch(e){}
   }
-  log&&log('&nbsp;&nbsp;· tidak bisa baca gambar dari '+host,'warn');
+  // cadangan terakhir: microlink (kuota gratis kecil)
+  if(!microlinkHabis){
+    try{
+      const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(pageUrl),{signal:AbortSignal.timeout(15000)});
+      if(r.status===429){microlinkHabis=true;}
+      else if(r.ok){const d=await r.json();const u=d.data?.image?.url;if(u) return {imgs:[{url:u,jenis:'utama'}],title:d.data?.title||''};}
+    }catch(e){}
+  }
+  log&&log('&nbsp;&nbsp;· tidak bisa baca halaman '+host,'warn');
   return null;
 }
 
@@ -2417,15 +2434,19 @@ async function kumpulkanKandidatGambar(art,log){
     artikel=await cariArtikelSumberViaClaude(art.judul,log,null);
   }
   artikel.sort((a,b)=>(dariMediaPrioritas(b.url)?1:0)-(dariMediaPrioritas(a.url)?1:0));
+  const dariArtikel=[];
   for(const a of artikel){
-    const og=await ambilOgImage(a.url,log);
-    if(!og) continue;
+    const g=await ambilGambarArtikel(a.url,log);
+    if(!g) continue;
     // cek ulang kecocokan pakai judul halaman (kalau ada)
-    if(og.title&&skorRelevan(art.judul,og.title+' '+a.title)<BATAS_RELEVAN) continue;
-    add({url:og.img,credit:new URL(a.url).hostname.replace(/^www\./,''),type:'artikel'});
-    if(list.length>=4) break;
+    if(g.title&&skorRelevan(art.judul,g.title+' '+a.title)<BATAS_RELEVAN) continue;
+    const host=new URL(a.url).hostname.replace(/^www\./,'');
+    dariArtikel.push(g.imgs.map(x=>({url:x.url,credit:host,type:'artikel-'+x.jenis})));
   }
-  if(artikel.length) log&&log('&nbsp;&nbsp;· gambar artikel terbaca: '+list.filter(x=>x.type==='artikel').length+'/'+artikel.length);
+  // susun bergiliran: foto isi artikel dulu (biasanya polos), lalu gambar utama
+  const isiDulu=dariArtikel.map(arr=>arr.filter(x=>x.type==='artikel-isi').concat(arr.filter(x=>x.type==='artikel-utama')));
+  for(let i=0;i<8;i++) isiDulu.forEach(arr=>arr[i]&&add(arr[i]));
+  if(artikel.length) log&&log('&nbsp;&nbsp;· foto terkumpul dari artikel: '+list.length+(microlinkHabis?' (microlink: kuota habis, dilewati)':''));
   // 2. Google CSE (kalau masih aktif) — hanya hasil yang judulnya cocok
   if(list.length<2) (await cariGoogleCSEImageList(art.judul,log))
     .sort((a,b)=>(dariMediaPrioritas('https://'+(b.credit||''))?1:0)-(dariMediaPrioritas('https://'+(a.credit||''))?1:0)).forEach(add);
@@ -2494,7 +2515,7 @@ async function blobKeBase64(blob){
 // true = foto asli polos tanpa tulisan/logo/template
 async function cekFotoPolos(blob,judul,log){
   const key=getKey('claude-key');
-  if(!key) return true;
+  if(!key) return {ok:true};
   try{
     // kecilkan dulu supaya hemat token
     const kecil=await new Promise(res=>{
@@ -2510,14 +2531,18 @@ async function cekFotoPolos(blob,judul,log){
       headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:20,messages:[{role:'user',content:[
         {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
-        {type:'text',text:'Periksa gambar ini. Jawab POLOS hanya jika ini foto asli (bukan desain grafis) TANPA tulisan judul/headline, TANPA teks besar, TANPA logo atau watermark media yang terlihat, TANPA template/bingkai berita, bukan kolase, bukan screenshot video/media sosial, bukan poster/infografis. Selain itu jawab TIDAK. Jawab satu kata saja.'}
+        {type:'text',text:'Ini kandidat foto untuk berita berjudul: "'+judul+'".\n'
+          +'Jawab "POLOS" jika ini FOTO asli yang bersih dari tambahan editor. Tulisan yang memang bagian dari pemandangan (papan nama, spanduk, seragam, plat nomor, tulisan di gedung/gerobak) BOLEH.\n'
+          +'Jawab "TIDAK: <alasan singkat>" jika ada salah satu: teks/judul/caption yang DITEMPEL di atas foto, logo atau watermark media (walau kecil di pojok), bingkai/template berita, kolase beberapa foto, screenshot video/media sosial, poster/infografis/kartu kutipan, gambar ilustrasi/kartun.\n'
+          +'Jawab dalam satu baris saja.'}
       ]}]})
     });
     const d=await r.json();
-    if(!r.ok){log&&log('&nbsp;&nbsp;· cek polos gagal: '+(d.error?.message||r.status),'warn');return false;}
-    const jawab=((d.content||[]).map(x=>x.text||'').join('')).toUpperCase();
-    return jawab.includes('POLOS');
-  }catch(e){log&&log('&nbsp;&nbsp;· cek polos error: '+e.message,'warn');return false;}
+    if(!r.ok){log&&log('&nbsp;&nbsp;· cek polos gagal: '+(d.error?.message||r.status),'warn');return {ok:false,alasan:'cek gagal'};}
+    const jawab=((d.content||[]).map(x=>x.text||'').join('')).trim();
+    if(/^\W*POLOS/i.test(jawab)) return {ok:true};
+    return {ok:false,alasan:jawab.replace(/^\W*TIDAK\s*:?\s*/i,'').substring(0,80)};
+  }catch(e){log&&log('&nbsp;&nbsp;· cek polos error: '+e.message,'warn');return {ok:false,alasan:'error'};}
 }
 
 // Kata kunci bahasa Inggris untuk foto stok (tanpa nama orang)
@@ -2561,13 +2586,14 @@ async function siapkanGambar(art,site,logDetail){
     kandidat = mode==='stok' ? await cariPexels(art.judul,detail) : await kumpulkanKandidatGambar(art,detail);
   }catch(e){detail('&nbsp;&nbsp;· error: '+e.message,'err');}
   let errUpload='',cekVision=0;
-  for(const k of kandidat.slice(0,8)){
+  for(const k of kandidat.slice(0,14)){
     const blob=await downloadGambar(k.url);
     if(!blob){detail('&nbsp;&nbsp;· gagal unduh: '+k.url.substring(0,80),'warn');continue;}
     if(!k.polos){
-      if(cekVision>=4) break; // batasi biaya: maksimal 4 cek per berita
+      if(cekVision>=8) break; // batasi biaya: maksimal 8 cek per berita (Haiku, murah)
       cekVision++;
-      if(!(await cekFotoPolos(blob,art.judul,detail))){detail('&nbsp;&nbsp;· ditolak (ada tulisan/logo): '+(k.credit||k.type),'warn');continue;}
+      const cek=await cekFotoPolos(blob,art.judul,detail);
+      if(!cek.ok){detail('&nbsp;&nbsp;· ditolak '+(k.credit||k.type)+' ('+k.type.replace('artikel-','')+'): '+cek.alasan,'warn');continue;}
     }
     try{
       const id=await uploadBlobKeWP(blob,site,art.judul,k.credit);
