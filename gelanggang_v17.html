@@ -2264,40 +2264,114 @@ function gambarValid(u){
   return typeof u==='string'&&u.startsWith('http')&&!IMG_SKIP.some(s=>u.toLowerCase().includes(s));
 }
 
-async function cariGoogleCSEImageList(keyword){
+async function cariGoogleCSEImageList(keyword,log){
   const key=getKey('google-cse-key'),cx=getKey('google-cse-cx');
-  if(!key||!cx) return [];
+  if(!key||!cx){log&&log('&nbsp;&nbsp;· Google: API key belum diisi');return [];}
   try{
     const q=encodeURIComponent(keyword.substring(0,100));
     const url='https://www.googleapis.com/customsearch/v1?key='+key+'&cx='+cx+'&q='+q+'&searchType=image&num=8&imgSize=large&safe=active&gl=id&hl=id';
     const r=await fetch(url,{signal:AbortSignal.timeout(10000)});
-    if(!r.ok){console.warn('Google CSE error',r.status);return [];}
+    if(!r.ok){
+      let m='';try{m=(await r.json()).error?.message||'';}catch(e){}
+      log&&log('&nbsp;&nbsp;· Google: gagal HTTP '+r.status+' '+m.substring(0,90),'err');
+      return [];
+    }
     const d=await r.json();
+    log&&log('&nbsp;&nbsp;· Google: '+(d.items||[]).length+' hasil');
     return (d.items||[])
       .filter(it=>gambarValid(it.link)&&(it.image?.width||0)>=400)
       .map(it=>({url:it.link,credit:it.displayLink,type:'gcse',thumb:it.image?.thumbnailLink}));
-  }catch(e){return [];}
+  }catch(e){log&&log('&nbsp;&nbsp;· Google: '+e.message,'err');return [];}
+}
+
+// --- Sumber baru: Claude cari artikel asli → ambil og:image artikel itu
+async function cariArtikelSumberViaClaude(judul,log){
+  const key=getKey('claude-key');
+  if(!key){log&&log('&nbsp;&nbsp;· Claude: API key belum diisi','err');return [];}
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:600,
+        tools:[{type:'web_search_20250305',name:'web_search',max_uses:2}],
+        messages:[{role:'user',content:'Cari artikel berita online Indonesia tentang: "'+judul+'". Balas hanya daftar URL artikel (maksimal 5), satu per baris.'}]})
+    });
+    const d=await r.json();
+    if(!r.ok){log&&log('&nbsp;&nbsp;· Claude: '+(d.error?.message||'HTTP '+r.status),'err');return [];}
+    const urls=[];
+    (d.content||[]).forEach(b=>{
+      if(b.type==='web_search_tool_result'&&Array.isArray(b.content)) b.content.forEach(x=>x.url&&urls.push(x.url));
+      if(b.type==='text') (b.text.match(/https?:\/\/[^\s)"'<>\]]+/g)||[]).forEach(u=>urls.push(u));
+    });
+    const bersih=[...new Set(urls)].filter(u=>!/youtube\.com|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com\/|wikipedia\.org/.test(u)).slice(0,5);
+    log&&log('&nbsp;&nbsp;· Claude: '+bersih.length+' artikel sumber ditemukan');
+    return bersih;
+  }catch(e){log&&log('&nbsp;&nbsp;· Claude: '+e.message,'err');return [];}
+}
+
+// Ambil og:image dari halaman artikel (lewat layanan yang bebas CORS)
+async function ambilOgImage(pageUrl){
+  // 1) microlink (gratis ±50/hari)
+  try{
+    const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(pageUrl),{signal:AbortSignal.timeout(12000)});
+    if(r.ok){const d=await r.json();const u=d.data?.image?.url;if(u) return u;}
+  }catch(e){}
+  // 2) baca HTML lewat proxy, cari meta og:image / twitter:image
+  const proxies=[
+    'https://api.allorigins.win/raw?url='+encodeURIComponent(pageUrl),
+    'https://corsproxy.io/?url='+encodeURIComponent(pageUrl)
+  ];
+  for(const px of proxies){
+    try{
+      const r=await fetch(px,{signal:AbortSignal.timeout(12000)});
+      if(!r.ok) continue;
+      const html=(await r.text()).substring(0,200000);
+      const m=html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i)
+            ||html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
+      if(m) return new URL(m[1].replace(/&amp;/g,'&'),pageUrl).href;
+    }catch(e){}
+  }
+  return null;
+}
+
+// Wikipedia bahasa Indonesia (lebih cocok untuk judul berbahasa Indonesia)
+async function cariWikiIndo(judul,log){
+  try{
+    const kw=judul.replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(w=>w.length>3).slice(0,5).join(' ');
+    const url='https://id.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(kw)+'&gsrlimit=5&prop=pageimages&piprop=original&format=json&origin=*';
+    const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    const d=await r.json();
+    const hasil=Object.values(d.query?.pages||{}).sort((a,b)=>(a.index||0)-(b.index||0))
+      .map(p=>p.original?.source).filter(u=>u&&!/\.svg$/i.test(u));
+    log&&log('&nbsp;&nbsp;· Wikipedia: '+hasil.length+' gambar');
+    return hasil.map(u=>({url:u,credit:'Wikimedia Commons',type:'wikimedia'}));
+  }catch(e){log&&log('&nbsp;&nbsp;· Wikipedia: '+e.message,'err');return [];}
 }
 
 // Ambil daftar kandidat gambar, urut dari yang paling relevan
-async function kumpulkanKandidatGambar(art){
+async function kumpulkanKandidatGambar(art,log){
   const list=[];
   const seen=new Set();
   const add=c=>{if(c&&gambarValid(c.url)&&!seen.has(c.url)){seen.add(c.url);list.push(c);}};
   if(art.img_url) add({url:art.img_url,credit:art.img_credit||'',type:art.img_type||'claude'});
-  // Google: judul lengkap dulu, lalu versi pendek
-  let g=await cariGoogleCSEImageList(art.judul);
-  if(g.length<2){
-    const pendek=art.judul.split(/[,:–-]/)[0].trim();
-    if(pendek&&pendek!==art.judul) g=g.concat(await cariGoogleCSEImageList(pendek));
+  // 1. Artikel asli via Claude → og:image (paling relevan dengan beritanya)
+  const artikelUrls=await cariArtikelSumberViaClaude(art.judul,log);
+  for(const u of artikelUrls){
+    const og=await ambilOgImage(u);
+    if(og) add({url:og,credit:new URL(u).hostname.replace(/^www\./,''),type:'artikel'});
+    if(list.length>=4) break;
   }
-  g.forEach(add);
-  if(getKey('youtube-api-key')){
+  if(artikelUrls.length) log&&log('&nbsp;&nbsp;· og:image terbaca: '+list.filter(x=>x.type==='artikel').length+'/'+artikelUrls.length);
+  // 2. Google CSE (kalau masih aktif)
+  if(list.length<2) (await cariGoogleCSEImageList(art.judul,log)).forEach(add);
+  // 3. YouTube
+  if(list.length<2&&getKey('youtube-api-key')){
     const yt=await cariYoutubeDataAPI(art.judul);
-    if(yt) add({url:yt.url.replace('hqdefault','maxresdefault'),credit:yt.credit,type:'youtube'}),add({url:yt.url,credit:yt.credit,type:'youtube'});
+    log&&log('&nbsp;&nbsp;· YouTube: '+(yt?'1 thumbnail':'0'));
+    if(yt) add({url:yt.url,credit:yt.credit,type:'youtube'});
   }
-  const wiki=await cariWikimediaImage(art.judul);
-  if(wiki) add({url:wiki.url,credit:'Wikimedia',type:'wikimedia'});
+  // 4. Wikipedia Indonesia
+  if(list.length<2) (await cariWikiIndo(art.judul,log)).forEach(add);
   return list;
 }
 
@@ -2346,14 +2420,15 @@ async function uploadBlobKeWP(blob,site,judul,credit){
 }
 
 // Pipeline lengkap: kandidat → download → upload → default
-async function siapkanGambar(art,site){
-  const log=(m,t)=>{try{mssLog(m,t);}catch(e){} console.log('[gambar]',m);};
+async function siapkanGambar(art,site,logDetail){
+  const log=(m,t)=>{try{mssLog(m.replace(/&nbsp;/g,''),t);}catch(e){} console.log('[gambar]',m);};
+  const detail=logDetail||((m,t)=>{console.log('[gambar]',m);});
   let kandidat=[];
-  try{kandidat=await kumpulkanKandidatGambar(art);}catch(e){}
+  try{kandidat=await kumpulkanKandidatGambar(art,detail);}catch(e){detail('&nbsp;&nbsp;· error: '+e.message,'err');}
   let errUpload='';
   for(const k of kandidat.slice(0,8)){
     const blob=await downloadGambar(k.url);
-    if(!blob) continue;
+    if(!blob){detail('&nbsp;&nbsp;· gagal unduh: '+k.url.substring(0,80),'warn');continue;}
     try{
       const id=await uploadBlobKeWP(blob,site,art.judul,k.credit);
       art.img_url=k.url;art.img_type=k.type;art.img_credit=k.credit;
@@ -2411,7 +2486,7 @@ async function perbaikiGambarKosong(){
     for(const p of kosong){
       const judul=(p.title?.rendered||'').replace(/<[^>]+>/g,'').replace(/&#8211;/g,'–').replace(/&#8217;/g,"'").replace(/&amp;/g,'&').replace(/&#\d+;/g,'').trim();
       tulis('🔎 '+judul.substring(0,70));
-      const gbr=await siapkanGambar({judul},site);
+      const gbr=await siapkanGambar({judul},site,(m,c)=>tulis(m,c||'info'));
       if(gbr.mediaId){
         const u=await fetch(url+'/wp-json/wp/v2/posts/'+p.id,{method:'POST',headers:{'Authorization':auth,'Content-Type':'application/json'},body:JSON.stringify({featured_media:gbr.mediaId})});
         if(u.ok){ok++;tulis('&nbsp;&nbsp;✓ Gambar terpasang ('+gbr.status+') — <a href="'+p.link+'" target="_blank" style="color:var(--blue)">lihat</a>','ok');}
