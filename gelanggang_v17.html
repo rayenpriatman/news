@@ -730,6 +730,7 @@ select option{background:var(--bg)}
           <div><label>Website</label><select id="fix-site"></select></div>
           <div><label>Cek berapa berita terakhir</label><input type="number" id="fix-jumlah" value="30" min="5" max="100"></div>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:4px 0 12px;font-size:.82rem;text-transform:none;letter-spacing:0"><input type="checkbox" id="fix-wiki" checked style="width:16px;height:16px"> Ganti juga gambar Wikipedia/Wikimedia yang tidak sesuai</label>
         <button class="btn btn-primary" id="btn-fix-img" onclick="perbaikiGambarKosong()">&#128444; Cari &amp; Pasang Gambar</button>
         <div class="tg-log" id="fix-log" style="margin-top:10px;max-height:300px;overflow:auto"></div>
       </div>
@@ -1325,7 +1326,7 @@ async function cariYoutubeDataAPI(keyword){
       const videoId=item.id?.videoId;
       if(!videoId) continue;
       const thumb=item.snippet?.thumbnails?.high?.url||'https://img.youtube.com/vi/'+videoId+'/hqdefault.jpg';
-      return{url:thumb,videoId,credit:item.snippet?.channelTitle||'YouTube'};
+      return{url:thumb,videoId,credit:item.snippet?.channelTitle||'YouTube',title:item.snippet?.title||''};
     }
   }catch(e){}
   return null;
@@ -2260,6 +2261,18 @@ async function generateSemuaProvinsi(){
 
 const IMG_SKIP=['shutterstock','gettyimages','istockphoto','alamy','dreamstime','freepik','123rf','depositphotos','logo','favicon','avatar','icon','sprite','placeholder','default-image','no-image'];
 
+// Cek kecocokan judul: berapa persen kata penting judul berita yang muncul di judul sumber
+const STOPW=new Set(['yang','dan','di','ke','dari','untuk','dengan','pada','dalam','ini','itu','atau','juga','karena','saat','oleh','para','akan','telah','sudah','jadi','soal','terkait','usai','bagi','tak','tidak','hingga','sebagai','berita','terbaru','hari']);
+function kataPenting(t){
+  return [...new Set((t||'').toLowerCase().replace(/<[^>]+>/g,' ').replace(/[^\p{L}\p{N}\s]/gu,' ').split(/\s+/).filter(w=>w.length>2&&!STOPW.has(w)))];
+}
+function skorRelevan(judul,judulSumber){
+  const a=kataPenting(judul),b=new Set(kataPenting(judulSumber));
+  if(!a.length||!b.size) return 0;
+  return a.filter(w=>b.has(w)).length/a.length;
+}
+const BATAS_RELEVAN=0.4;
+
 function gambarValid(u){
   return typeof u==='string'&&u.startsWith('http')&&!IMG_SKIP.some(s=>u.toLowerCase().includes(s));
 }
@@ -2279,7 +2292,7 @@ async function cariGoogleCSEImageList(keyword,log){
     const d=await r.json();
     log&&log('&nbsp;&nbsp;· Google: '+(d.items||[]).length+' hasil');
     return (d.items||[])
-      .filter(it=>gambarValid(it.link)&&(it.image?.width||0)>=400)
+      .filter(it=>gambarValid(it.link)&&(it.image?.width||0)>=400&&skorRelevan(keyword,(it.title||'')+' '+(it.snippet||''))>=BATAS_RELEVAN)
       .map(it=>({url:it.link,credit:it.displayLink,type:'gcse',thumb:it.image?.thumbnailLink}));
   }catch(e){log&&log('&nbsp;&nbsp;· Google: '+e.message,'err');return [];}
 }
@@ -2298,39 +2311,47 @@ async function cariArtikelSumberViaClaude(judul,log){
     });
     const d=await r.json();
     if(!r.ok){log&&log('&nbsp;&nbsp;· Claude: '+(d.error?.message||'HTTP '+r.status),'err');return [];}
-    const urls=[];
+    const hasil=[];const seen=new Set();
     (d.content||[]).forEach(b=>{
-      if(b.type==='web_search_tool_result'&&Array.isArray(b.content)) b.content.forEach(x=>x.url&&urls.push(x.url));
-      if(b.type==='text') (b.text.match(/https?:\/\/[^\s)"'<>\]]+/g)||[]).forEach(u=>urls.push(u));
+      if(b.type==='web_search_tool_result'&&Array.isArray(b.content)) b.content.forEach(x=>{
+        if(!x.url||seen.has(x.url)) return; seen.add(x.url);
+        hasil.push({url:x.url,title:x.title||'',skor:skorRelevan(judul,x.title||'')});
+      });
     });
-    const bersih=[...new Set(urls)].filter(u=>!/youtube\.com|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com\/|wikipedia\.org/.test(u)).slice(0,5);
-    log&&log('&nbsp;&nbsp;· Claude: '+bersih.length+' artikel sumber ditemukan');
-    return bersih;
+    const blok=/youtube\.com|facebook\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com\/|wikipedia\.org|gelanggangnews|satelit\.news/;
+    const cocok=hasil.filter(h=>!blok.test(h.url)&&h.skor>=BATAS_RELEVAN).sort((a,b)=>b.skor-a.skor).slice(0,5);
+    log&&log('&nbsp;&nbsp;· Claude: '+hasil.length+' hasil, '+cocok.length+' artikel cocok dengan judul');
+    return cocok;
   }catch(e){log&&log('&nbsp;&nbsp;· Claude: '+e.message,'err');return [];}
 }
 
 // Ambil og:image dari halaman artikel (lewat layanan yang bebas CORS)
-async function ambilOgImage(pageUrl){
+async function ambilOgImage(pageUrl,log){
+  const host=new URL(pageUrl).hostname.replace(/^www\./,'');
   // 1) microlink (gratis ±50/hari)
   try{
-    const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(pageUrl),{signal:AbortSignal.timeout(12000)});
-    if(r.ok){const d=await r.json();const u=d.data?.image?.url;if(u) return u;}
+    const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(pageUrl),{signal:AbortSignal.timeout(15000)});
+    if(r.ok){const d=await r.json();const u=d.data?.image?.url;if(u) return {img:u,title:d.data?.title||''};}
+    else log&&log('&nbsp;&nbsp;· microlink '+host+': HTTP '+r.status,'warn');
   }catch(e){}
-  // 2) baca HTML lewat proxy, cari meta og:image / twitter:image
-  const proxies=[
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(pageUrl),
-    'https://corsproxy.io/?url='+encodeURIComponent(pageUrl)
+  // 2) baca HTML lewat pembaca/proxy, cari meta og:image / twitter:image
+  const sumber=[
+    {u:'https://r.jina.ai/'+pageUrl,h:{'X-Return-Format':'html'}},
+    {u:'https://api.allorigins.win/raw?url='+encodeURIComponent(pageUrl),h:{}},
+    {u:'https://corsproxy.io/?url='+encodeURIComponent(pageUrl),h:{}}
   ];
-  for(const px of proxies){
+  for(const sb of sumber){
     try{
-      const r=await fetch(px,{signal:AbortSignal.timeout(12000)});
+      const r=await fetch(sb.u,{headers:sb.h,signal:AbortSignal.timeout(15000)});
       if(!r.ok) continue;
-      const html=(await r.text()).substring(0,200000);
+      const html=(await r.text()).substring(0,300000);
       const m=html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*content=["']([^"']+)["']/i)
             ||html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["'](?:og:image|twitter:image)["']/i);
-      if(m) return new URL(m[1].replace(/&amp;/g,'&'),pageUrl).href;
+      const t=(html.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)||html.match(/<title[^>]*>([^<]+)<\/title>/i)||[])[1]||'';
+      if(m) return {img:new URL(m[1].replace(/&amp;/g,'&'),pageUrl).href,title:t};
     }catch(e){}
   }
+  log&&log('&nbsp;&nbsp;· tidak bisa baca gambar dari '+host,'warn');
   return null;
 }
 
@@ -2353,25 +2374,29 @@ async function kumpulkanKandidatGambar(art,log){
   const list=[];
   const seen=new Set();
   const add=c=>{if(c&&gambarValid(c.url)&&!seen.has(c.url)){seen.add(c.url);list.push(c);}};
-  if(art.img_url) add({url:art.img_url,credit:art.img_credit||'',type:art.img_type||'claude'});
-  // 1. Artikel asli via Claude → og:image (paling relevan dengan beritanya)
-  const artikelUrls=await cariArtikelSumberViaClaude(art.judul,log);
-  for(const u of artikelUrls){
-    const og=await ambilOgImage(u);
-    if(og) add({url:og,credit:new URL(u).hostname.replace(/^www\./,''),type:'artikel'});
+  // 0. Gambar dari Claude saat menulis berita (hanya kalau dari situs berita, bukan Wikipedia)
+  if(art.img_url&&!/wiki(pedia|media)/i.test(art.img_url)) add({url:art.img_url,credit:art.img_credit||'',type:art.img_type||'claude'});
+  // 1. Artikel asli yang judulnya cocok → og:image
+  const artikel=await cariArtikelSumberViaClaude(art.judul,log);
+  for(const a of artikel){
+    const og=await ambilOgImage(a.url,log);
+    if(!og) continue;
+    // cek ulang kecocokan pakai judul halaman (kalau ada)
+    if(og.title&&skorRelevan(art.judul,og.title+' '+a.title)<BATAS_RELEVAN) continue;
+    add({url:og.img,credit:new URL(a.url).hostname.replace(/^www\./,''),type:'artikel'});
     if(list.length>=4) break;
   }
-  if(artikelUrls.length) log&&log('&nbsp;&nbsp;· og:image terbaca: '+list.filter(x=>x.type==='artikel').length+'/'+artikelUrls.length);
-  // 2. Google CSE (kalau masih aktif)
+  if(artikel.length) log&&log('&nbsp;&nbsp;· gambar artikel terbaca: '+list.filter(x=>x.type==='artikel').length+'/'+artikel.length);
+  // 2. Google CSE (kalau masih aktif) — hanya hasil yang judulnya cocok
   if(list.length<2) (await cariGoogleCSEImageList(art.judul,log)).forEach(add);
-  // 3. YouTube
+  // 3. YouTube — hanya video yang judulnya cocok
   if(list.length<2&&getKey('youtube-api-key')){
     const yt=await cariYoutubeDataAPI(art.judul);
-    log&&log('&nbsp;&nbsp;· YouTube: '+(yt?'1 thumbnail':'0'));
-    if(yt) add({url:yt.url,credit:yt.credit,type:'youtube'});
+    const ok=yt&&skorRelevan(art.judul,yt.title||'')>=BATAS_RELEVAN;
+    log&&log('&nbsp;&nbsp;· YouTube: '+(ok?'1 video cocok':'tidak ada yang cocok'));
+    if(ok) add({url:yt.url,credit:yt.credit,type:'youtube'});
   }
-  // 4. Wikipedia Indonesia
-  if(list.length<2) (await cariWikiIndo(art.judul,log)).forEach(add);
+  // Wikipedia sengaja TIDAK dipakai: gambarnya hampir selalu tidak sesuai dengan kejadian berita.
   return list;
 }
 
@@ -2480,8 +2505,21 @@ async function perbaikiGambarKosong(){
     const r=await fetch(url+'/wp-json/wp/v2/posts?per_page='+Math.min(jml,100)+'&status=publish,draft&_fields=id,title,featured_media,link,categories',{headers:{'Authorization':auth}});
     if(!r.ok) throw new Error('Gagal ambil daftar post (HTTP '+r.status+')');
     const posts=await r.json();
-    const kosong=posts.filter(p=>!p.featured_media);
+    let kosong=posts.filter(p=>!p.featured_media);
     tulis(kosong.length+' dari '+posts.length+' berita belum punya gambar.',kosong.length?'warn':'ok');
+    if(document.getElementById('fix-wiki')?.checked){
+      const ids=posts.filter(p=>p.featured_media).map(p=>p.featured_media);
+      if(ids.length){
+        const mr=await fetch(url+'/wp-json/wp/v2/media?per_page=100&include='+ids.join(',')+'&_fields=id,source_url,caption',{headers:{'Authorization':auth}});
+        if(mr.ok){
+          const media=await mr.json();
+          const wikiIds=new Set(media.filter(m=>/wiki(media|pedia)/i.test((m.caption?.rendered||'')+' '+(m.source_url||''))).map(m=>m.id));
+          const salah=posts.filter(p=>wikiIds.has(p.featured_media));
+          if(salah.length) tulis(salah.length+' berita memakai gambar Wikipedia/Wikimedia, akan diganti.','warn');
+          kosong=kosong.concat(salah);
+        }
+      }
+    }
     let ok=0;
     for(const p of kosong){
       const judul=(p.title?.rendered||'').replace(/<[^>]+>/g,'').replace(/&#8211;/g,'–').replace(/&#8217;/g,"'").replace(/&amp;/g,'&').replace(/&#\d+;/g,'').trim();
