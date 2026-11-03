@@ -446,6 +446,8 @@ select option{background:var(--bg)}
             <input type="text" id="wp-user" placeholder="admin" oninput="saveKey('wp-user',this.value)">
           </div>
         </div>
+        <label>Nama Media (ditulis di awal berita)</label>
+        <input type="text" id="nama-media" placeholder="contoh: Satelit News" oninput="saveKey('nama-media',this.value)">
         <label>Application Password</label>
         <input type="password" id="wp-pass" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" oninput="saveKey('wp-pass',this.value)">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -799,7 +801,7 @@ select option{background:var(--bg)}
 // ================================================================
 // STATE & STORAGE
 // ================================================================
-const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','sheet-webhook-url','default-media-id','pexels-key','img-mode','media-prioritas'];
+const SAVE_KEYS=['wp-url','wp-user','wp-pass','claude-key','youtube-api-key','google-cse-key','google-cse-cx','tg-bot-token','tg-user-id','tg-poll-interval','post-status','jumlah','ai-model','sheet-webhook-url','default-media-id','pexels-key','img-mode','media-prioritas','nama-media'];
 
 let artikel=[], kategoriWP=[], katTerpilih=null, editIdx=-1, gayaTerpilih='formal';
 let sites=JSON.parse(localStorage.getItem('gn_sites')||'[]');
@@ -811,6 +813,18 @@ let riwayat=JSON.parse(localStorage.getItem('gn_riwayat')||'[]');
 
 // Load saved keys
 function getKey(k){return localStorage.getItem('gn_'+k)||'';}
+// Nama media site utama: diambil dari Konfigurasi, kalau kosong dari alamat website (satelit.news → Satelit News)
+function namaMediaUtama(){
+  const n=(localStorage.getItem('gn_nama-media')||'').trim();
+  if(n) return n;
+  try{
+    const h=new URL(getKey('wp-url')).hostname.replace(/^www\./,'');
+    const depan=h.split('.')[0];
+    return depan.charAt(0).toUpperCase()+depan.slice(1)+' News';
+  }catch(e){return 'Redaksi';}
+}
+// Nama untuk ditulis di berita (tanpa label "(Utama)" dsb.)
+function namaBersih(nama){return String(nama||'').replace(/\s*\([^)]*\)\s*/g,' ').trim()||namaMediaUtama();}
 function saveKey(k,v){localStorage.setItem('gn_'+k,v);}
 
 function loadAllFields(){
@@ -1020,13 +1034,13 @@ async function mulaiGenerate(katOverride=null, jumlahOverride=null, waktuOverrid
   setProg(10,'Menghubungi Claude AI...');
   if(tgChatId) await sendTelegramMsg(tgChatId,`Mencari *${jumlah} berita ${kat.name}* ${waktu}...`,true);
 
-  const prompt=`Kamu jurnalis senior media berita online AUTONEWS.com.
+  const prompt=`Kamu jurnalis senior media berita online ${namaMediaUtama()}.
 Tugas: Gunakan web search untuk mencari ${jumlah} berita TERBARU${topikStr} dari ${waktuAkurat} yang masuk kategori "${kat.name}".
 PENTING: Cari berita yang benar-benar terjadi HARI INI atau maksimal kemarin. Jangan ambil berita lama.
 Tulis artikel berita faktual dan informatif, gaya ${gayaMap[gaya]}.
 Saat kamu membuka halaman berita, catat juga URL gambar utama dari artikel tersebut (og:image atau gambar pertama di artikel, bukan shutterstock/getty/freepik). Isi di field "img_url". Kalau tidak ada, isi null.
 Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
-[{"judul":"judul berita","img_url":"https://url-gambar-artikel-asli.jpg","lead":"AUTONEWS – Kota – kalimat pembuka.","paragraf":["Paragraf 1 berisi fakta utama.","Paragraf 2 berisi detail dan latar belakang.","Paragraf 3 berisi kutipan narasumber.","Paragraf 4 berisi dampak atau perkembangan."],"excerpt":"ringkasan 1-2 kalimat.","tags":["tag1","tag2","tag3"]}]`;
+[{"judul":"judul berita","img_url":"https://url-gambar-artikel-asli.jpg","lead":"${namaMediaUtama()} – Kota – kalimat pembuka.","paragraf":["Paragraf 1 berisi fakta utama.","Paragraf 2 berisi detail dan latar belakang.","Paragraf 3 berisi kutipan narasumber.","Paragraf 4 berisi dampak atau perkembangan."],"excerpt":"ringkasan 1-2 kalimat.","tags":["tag1","tag2","tag3"]}]`;
 
   try{
     setProg(25,'Claude mencari berita...');
@@ -1097,7 +1111,7 @@ Format output WAJIB JSON array, TANPA teks lain, TANPA backtick markdown:
         addRiwayat({judul:artikel[i].judul,link:posted.link,kategori:kat.name,waktu:new Date().toISOString()});
         sendToSheet({
           waktu:new Date().toLocaleString('id-ID'),
-          site:'GelanggangNews (Utama)',
+          site:namaMediaUtama(),
           kategori:kat.name,
           judul:artikel[i].judul,
           link:posted.link,
@@ -1224,7 +1238,7 @@ async function postSemuaArtikel(tgChatId=null){
       addRiwayat({judul:art.judul,link:posted.link,kategori:art.kategori_nama,waktu:new Date().toISOString()});
       sendToSheet({
         waktu:new Date().toLocaleString('id-ID'),
-        site:'GelanggangNews (Utama)',
+        site:namaMediaUtama(),
         kategori:art.kategori_nama,
         judul:art.judul,
         link:posted.link,
@@ -2080,7 +2094,7 @@ function renderSites(){
     if(mainUrl){
       html+='<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer">'+
         '<input type="checkbox" class="site-check" data-id="0" data-main="1" checked style="width:16px;height:16px">'+
-        '<div><div style="font-size:.88rem;font-weight:600">GelanggangNews (Utama)</div>'+
+        '<div><div style="font-size:.88rem;font-weight:600">'+namaMediaUtama()+' (Utama)</div>'+
         '<div style="font-size:.72rem;color:var(--muted)">'+mainUrl+' &bull; keyword: <strong>Indonesia</strong></div></div></label>';
     }
     html+=sites.map(s=>
@@ -2109,7 +2123,7 @@ async function generateSemuaProvinsi(){
   const targetSites=[];
   document.querySelectorAll('.site-check:checked').forEach(cb=>{
     if(cb.dataset.main){
-      targetSites.push({id:0,nama:'GelanggangNews (Utama)',keyword:'Indonesia',url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')});
+      targetSites.push({id:0,nama:namaMediaUtama(),keyword:'Indonesia',url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')});
     } else {
       const site=sites.find(s=>s.id===parseInt(cb.dataset.id));
       if(site) targetSites.push(site);
@@ -2149,12 +2163,12 @@ async function generateSemuaProvinsi(){
     try{
       const key=getKey('claude-key');
       const prompt='INSTRUKSI: Balas HANYA dengan JSON array. DILARANG menulis teks penjelasan apapun. DILARANG menggunakan bahasa Inggris. '
-        +'Kamu jurnalis senior '+site.nama+'. '
+        +'Kamu jurnalis senior '+namaBersih(site.nama)+'. '
         +'Cari '+jumlah+' berita TERBARU hari ini ('+hariIni+') di wilayah '+site.keyword+'. '
         +'Fokus berita lokal '+site.keyword+'. Kategori: '+kat.name+'. Tulis dalam bahasa Indonesia. '
         +'Saat membuka artikel ambil og:image atau twitter:image sebagai img_url. Kalau tidak ada isi null. '
         +'OUTPUT WAJIB berupa JSON array ini saja: '
-        +'[{"judul":"...","img_url":"https://... atau null","lead":"'+site.nama+' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
+        +'[{"judul":"...","img_url":"https://... atau null","lead":"'+namaBersih(site.nama)+' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
 
       const resp=await fetch('https://api.anthropic.com/v1/messages',{
         method:'POST',
@@ -2450,8 +2464,8 @@ async function kumpulkanKandidatGambar(art,log){
   // 2. Google CSE (kalau masih aktif) — hanya hasil yang judulnya cocok
   if(list.length<2) (await cariGoogleCSEImageList(art.judul,log))
     .sort((a,b)=>(dariMediaPrioritas('https://'+(b.credit||''))?1:0)-(dariMediaPrioritas('https://'+(a.credit||''))?1:0)).forEach(add);
-  // 3. YouTube — hanya video yang judulnya cocok
-  if(list.length<2&&getKey('youtube-api-key')){
+  // 3. YouTube DINONAKTIFKAN: thumbnail YouTube hampir selalu penuh tulisan besar
+  if(false&&list.length<2&&getKey('youtube-api-key')){
     const yt=await cariYoutubeDataAPI(art.judul);
     const ok=yt&&skorRelevan(art.judul,yt.title||'')>=BATAS_RELEVAN;
     log&&log('&nbsp;&nbsp;· YouTube: '+(ok?'1 video cocok':'tidak ada yang cocok'));
@@ -2613,14 +2627,14 @@ async function siapkanGambar(art,site,logDetail){
 
 // Posting ke site utama (fungsi ini dipanggil di menu Generate Berita tapi dulu belum ada)
 async function postKeWP(art,status){
-  return postKeWPSite(art,status,{nama:'GelanggangNews (Utama)',url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')});
+  return postKeWPSite(art,status,{nama:namaMediaUtama(),url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')});
 }
 
 // ================================================================
 // v17: PERBAIKI GAMBAR UNTUK BERITA YANG SUDAH TERPOSTING
 // ================================================================
 function daftarSiteSemua(){
-  const arr=[{id:'main',nama:'GelanggangNews (Utama)',url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')}];
+  const arr=[{id:'main',nama:namaMediaUtama()+' (Utama)',url:getKey('wp-url'),user:getKey('wp-user'),pass:getKey('wp-pass')}];
   sites.forEach(s=>arr.push(s));
   return arr.filter(s=>s.url&&s.user&&s.pass);
 }
@@ -2700,6 +2714,11 @@ async function postKeWPSite(art,status,site){
   }
   if(!katIds.length && art.kategori_id && art.kategori_id>0){katIds=[art.kategori_id];}
 
+  // Pastikan kalimat pembuka memakai nama media yang benar untuk site ini
+  if(art.lead){
+    const benar=namaBersih(site.nama);
+    art.lead=art.lead.replace(/^\s*(GelanggangNews|Gelanggang\s*News|AUTONEWS)(\s*\([^)]*\))?/i,benar).replace(/\s*\(Utama\)/gi,'');
+  }
   const leadHtml=art.lead?'<p><strong>'+art.lead+'</strong></p>\n':'';
   const rawKonten=(art.konten||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim();
   let pars=rawKonten.split(/\n\n+/).map(p=>p.replace(/\n/g,' ').replace(/\s+/g,' ').trim()).filter(p=>p.length>15);
@@ -2816,7 +2835,7 @@ function renderMssSiteList(){
   // Site utama
   let html = `<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer">
     <input type="checkbox" class="mss-site-check" data-main="1" checked style="width:16px;height:16px">
-    <span style="font-size:.85rem;font-weight:500">GelanggangNews (Utama)</span>
+    <span style="font-size:.85rem;font-weight:500">${namaMediaUtama()} (Utama)</span>
     <span style="font-size:.72rem;color:var(--muted);margin-left:auto">${getKey('wp-url')||'—'}</span>
   </label>`;
   sites.forEach(s => {
@@ -2859,7 +2878,7 @@ function buildMssTodaySchedule(){
   // Kumpulkan site yang dicentang
   document.querySelectorAll('.mss-site-check:checked').forEach(cb => {
     if(cb.dataset.main){
-      checkedSites.push({id:'main', nama:'GelanggangNews (Utama)', keyword:'Indonesia', url:getKey('wp-url'), user:getKey('wp-user'), pass:getKey('wp-pass')});
+      checkedSites.push({id:'main', nama:namaMediaUtama(), keyword:'Indonesia', url:getKey('wp-url'), user:getKey('wp-user'), pass:getKey('wp-pass')});
     } else {
       const s = sites.find(s=>s.id===parseInt(cb.dataset.id));
       if(s) checkedSites.push(s);
@@ -2943,13 +2962,13 @@ async function runMssPosting(item){
   const kat = {name: kat_nama, id: katId, slug: kat_nama.toLowerCase().replace(/\s+&\s+/g,'-').replace(/\s+/g,'-')};
 
   const prompt = 'INSTRUKSI: Balas HANYA dengan JSON array. DILARANG menulis teks penjelasan apapun. DILARANG menggunakan bahasa Inggris. '
-    + 'Kamu jurnalis senior ' + site.nama + '. '
+    + 'Kamu jurnalis senior ' + namaBersih(site.nama) + '. '
     + 'Cari 1 berita TERBARU yang sedang VIRAL atau TRENDING hari ini (' + hariIni + ') di wilayah ' + site.keyword + '. '
     + 'Prioritaskan berita yang paling banyak dibicarakan atau ramai hari ini. '
     + 'Fokus berita lokal ' + site.keyword + '. Kategori: ' + kat_nama + '. Tulis dalam bahasa Indonesia. '
     + 'Saat membuka artikel ambil og:image atau twitter:image sebagai img_url. Kalau tidak ada isi null. '
     + 'OUTPUT WAJIB berupa JSON array ini saja: '
-    + '[{"judul":"...","img_url":"https://... atau null","lead":"' + site.nama + ' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
+    + '[{"judul":"...","img_url":"https://... atau null","lead":"' + namaBersih(site.nama) + ' - Kota - kalimat.","paragraf":["P1","P2","P3","P4"],"excerpt":"ringkasan.","tags":["t1","t2"]}]';
 
   try{
     const model = document.getElementById('ai-model')?.value || 'claude-haiku-4-5-20251001';
